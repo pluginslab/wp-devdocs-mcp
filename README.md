@@ -1,5 +1,9 @@
 # wp-devdocs-mcp
 
+<p align="center">
+  <img src="assets/banner.jpg" alt="The WordPress Dev's Daydream" width="600">
+</p>
+
 **Give your AI coding assistant a verified WordPress hook database instead of letting it guess.**
 
 wp-devdocs-mcp is a local [MCP server](https://modelcontextprotocol.io/) that indexes every action, filter, block registration, and JS API call from WordPress, WooCommerce, Gutenberg, or any plugin you work with. It gives AI tools like Claude Code a verified database to search and validate against instead of relying on training data.
