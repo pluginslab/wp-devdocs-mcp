@@ -1,6 +1,6 @@
 import fg from 'fast-glob';
 import { readFileSync, statSync } from 'node:fs';
-import { relative } from 'node:path';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fetchSource } from './sources/index.js';
 import { parsePhpFile } from './php-parser.js';
@@ -84,6 +84,13 @@ export async function indexSources(opts = {}) {
   return stats;
 }
 
+/**
+ * Index a single source — scans files, parses hooks/blocks/APIs, and upserts into the database.
+ * @param {object} source - Source row from the database
+ * @param {string} localPath - Absolute path to the source on disk
+ * @param {boolean} force - Skip mtime/hash caching when true
+ * @param {object} stats - Mutable stats object to accumulate counts
+ */
 async function indexSource(source, localPath, force, stats) {
   // Scan for PHP and JS/TS files
   const files = await fg([...PHP_PATTERNS, ...JS_PATTERNS], {
@@ -96,32 +103,27 @@ async function indexSource(source, localPath, force, stats) {
   console.error(`Found ${files.length} files to check in ${source.name}`);
 
   for (const file of files) {
-    const fullPath = `${localPath}/${file}`;
+    const fullPath = join(localPath, file);
 
     try {
       const fileStat = statSync(fullPath);
       const mtimeMs = fileStat.mtimeMs;
 
       // Check mtime for incremental skip
-      if (!force) {
-        const indexed = getIndexedFile(source.id, file);
-        if (indexed && indexed.mtime_ms === mtimeMs) {
-          stats.files_skipped++;
-          continue;
-        }
+      const indexed = !force ? getIndexedFile(source.id, file) : null;
+      if (indexed && indexed.mtime_ms === mtimeMs) {
+        stats.files_skipped++;
+        continue;
       }
 
       const content = readFileSync(fullPath, 'utf-8');
       const contentHash = createHash('sha256').update(content).digest('hex').slice(0, 16);
 
       // Skip if content hash matches (handles moved files / touched timestamps)
-      if (!force) {
-        const indexed = getIndexedFile(source.id, file);
-        if (indexed && indexed.content_hash === contentHash) {
-          upsertIndexedFile(source.id, file, mtimeMs, contentHash);
-          stats.files_skipped++;
-          continue;
-        }
+      if (indexed && indexed.content_hash === contentHash) {
+        upsertIndexedFile(source.id, file, mtimeMs, contentHash);
+        stats.files_skipped++;
+        continue;
       }
 
       const isPhp = file.endsWith('.php');

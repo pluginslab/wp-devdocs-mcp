@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('wp-hooks')
   .description('WordPress hook indexer and search CLI')
-  .version('1.0.0');
+  .version('1.0.1');
 
 // --- source:add ---
 program

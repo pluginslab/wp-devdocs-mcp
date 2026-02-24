@@ -13,7 +13,7 @@ import { getDb } from './db/sqlite.js';
 
 const server = new McpServer({
   name: 'wp-devdocs-mcp',
-  version: '1.0.0',
+  version: '1.0.1',
 });
 
 // Register tools

@@ -14,6 +14,11 @@ export const searchHooksSchema = {
   },
 };
 
+/**
+ * MCP tool handler — search WordPress hooks using full-text search.
+ * @param {object} args - { query, type?, source?, is_dynamic?, include_removed?, limit? }
+ * @returns {{ content: Array<{ type: string, text: string }>, isError?: boolean }}
+ */
 export function handleSearchHooks(args) {
   try {
     const results = searchHooks(args.query, {

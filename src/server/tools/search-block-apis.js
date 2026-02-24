@@ -10,6 +10,11 @@ export const searchBlockApisSchema = {
   },
 };
 
+/**
+ * MCP tool handler — search block registrations and WP JS API usages.
+ * @param {object} args - { query, limit? }
+ * @returns {{ content: Array<{ type: string, text: string }>, isError?: boolean }}
+ */
 export function handleSearchBlockApis(args) {
   try {
     const { blocks, apis } = searchBlockApis(args.query, { limit: args.limit || 20 });

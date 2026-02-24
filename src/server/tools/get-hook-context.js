@@ -9,6 +9,11 @@ export const getHookContextSchema = {
   },
 };
 
+/**
+ * MCP tool handler — get full surrounding code context for a hook.
+ * @param {object} args - { hook } where hook is a numeric ID or exact name
+ * @returns {{ content: Array<{ type: string, text: string }>, isError?: boolean }}
+ */
 export function handleGetHookContext(args) {
   try {
     const hook = getHookContext(args.hook);
@@ -46,7 +51,8 @@ export function handleGetHookContext(args) {
     if (hook.code_after) codeLines.push(hook.code_after);
 
     if (codeLines.length > 0) {
-      sections.push(`\n### Code Context\n\`\`\`php\n${codeLines.join('\n')}\n\`\`\``);
+      const lang = hook.type.startsWith('js_') ? 'js' : 'php';
+      sections.push(`\n### Code Context\n\`\`\`${lang}\n${codeLines.join('\n')}\n\`\`\``);
     }
 
     return {

@@ -5,6 +5,11 @@ import { DB_PATH } from '../constants.js';
 
 let db;
 
+/**
+ * Get or create the SQLite database connection.
+ * Creates the database directory and initializes the schema on first call.
+ * @returns {import('better-sqlite3').Database}
+ */
 export function getDb() {
   if (!db) {
     mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -16,8 +21,12 @@ export function getDb() {
   return db;
 }
 
+/**
+ * Close the database connection and clear the statement cache.
+ */
 export function closeDb() {
   if (db) {
+    stmtCache.clear();
     db.close();
     db = null;
   }
@@ -144,6 +153,12 @@ function initDb(db) {
 // --- Prepared statement cache ---
 const stmtCache = new Map();
 
+/**
+ * Get or create a cached prepared statement for the given SQL.
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} sql
+ * @returns {import('better-sqlite3').Statement}
+ */
 function stmt(db, sql) {
   if (!stmtCache.has(sql)) {
     stmtCache.set(sql, db.prepare(sql));
@@ -153,6 +168,11 @@ function stmt(db, sql) {
 
 // --- Sources ---
 
+/**
+ * Register a new source in the database.
+ * @param {object} data - Source configuration (name, type, repo_url, subfolder, local_path, token_env_var, branch, enabled)
+ * @returns {import('better-sqlite3').RunResult}
+ */
 export function addSource(data) {
   const db = getDb();
   return stmt(db, `
@@ -170,32 +190,60 @@ export function addSource(data) {
   });
 }
 
+/**
+ * List all registered sources.
+ * @returns {Array<object>}
+ */
 export function listSources() {
   const db = getDb();
   return stmt(db, 'SELECT * FROM sources ORDER BY name').all();
 }
 
+/**
+ * Get a source by its unique name.
+ * @param {string} name
+ * @returns {object|undefined}
+ */
 export function getSource(name) {
   const db = getDb();
   return stmt(db, 'SELECT * FROM sources WHERE name = ?').get(name);
 }
 
+/**
+ * Get a source by its numeric ID.
+ * @param {number} id
+ * @returns {object|undefined}
+ */
 export function getSourceById(id) {
   const db = getDb();
   return stmt(db, 'SELECT * FROM sources WHERE id = ?').get(id);
 }
 
+/**
+ * Remove a source and all its associated data (hooks, blocks, APIs, FTS entries).
+ * Runs within a transaction for consistency.
+ * @param {string} name - Source name
+ * @returns {object|null} The removed source object, or null if not found
+ */
 export function removeSource(name) {
   const db = getDb();
   const source = getSource(name);
   if (!source) return null;
-  stmt(db, 'DELETE FROM hooks_fts WHERE rowid IN (SELECT id FROM hooks WHERE source_id = ?)').run(source.id);
-  stmt(db, 'DELETE FROM block_registrations_fts WHERE rowid IN (SELECT id FROM block_registrations WHERE source_id = ?)').run(source.id);
-  stmt(db, 'DELETE FROM api_usages_fts WHERE rowid IN (SELECT id FROM api_usages WHERE source_id = ?)').run(source.id);
-  stmt(db, 'DELETE FROM sources WHERE name = ?').run(name);
+  const tx = db.transaction(() => {
+    stmt(db, 'DELETE FROM hooks_fts WHERE rowid IN (SELECT id FROM hooks WHERE source_id = ?)').run(source.id);
+    stmt(db, 'DELETE FROM block_registrations_fts WHERE rowid IN (SELECT id FROM block_registrations WHERE source_id = ?)').run(source.id);
+    stmt(db, 'DELETE FROM api_usages_fts WHERE rowid IN (SELECT id FROM api_usages WHERE source_id = ?)').run(source.id);
+    stmt(db, 'DELETE FROM sources WHERE name = ?').run(name);
+  });
+  tx();
   return source;
 }
 
+/**
+ * Check whether a source has any indexed files.
+ * @param {number} sourceId
+ * @returns {boolean}
+ */
 export function isSourceIndexed(sourceId) {
   const db = getDb();
   const row = stmt(db, 'SELECT COUNT(*) as count FROM indexed_files WHERE source_id = ?').get(sourceId);
@@ -204,6 +252,12 @@ export function isSourceIndexed(sourceId) {
 
 // --- Hooks ---
 
+/**
+ * Insert or update a hook. Uses content_hash to detect changes.
+ * Returns { id, action } where action is 'inserted', 'updated', or 'skipped'.
+ * @param {object} data - Hook data including source_id, file_path, line_number, name, type, etc.
+ * @returns {{ id: number, action: string }}
+ */
 export function upsertHook(data) {
   const db = getDb();
   const upsertTx = db.transaction((d) => {
@@ -262,6 +316,14 @@ export function upsertHook(data) {
   return upsertTx(data);
 }
 
+/**
+ * Soft-delete hooks that are no longer present in a file.
+ * Marks hooks as 'removed' if their ID is not in the activeIds list.
+ * @param {number} sourceId
+ * @param {string} filePath
+ * @param {Array<number>} activeIds - IDs of hooks still found in the file
+ * @returns {number} Count of hooks marked as removed
+ */
 export function markHooksRemoved(sourceId, filePath, activeIds) {
   const db = getDb();
   const tx = db.transaction(() => {
@@ -286,6 +348,12 @@ export function markHooksRemoved(sourceId, filePath, activeIds) {
   return tx();
 }
 
+/**
+ * Full-text search hooks using FTS5 with BM25 ranking.
+ * @param {string} query - Search keywords
+ * @param {object} [opts] - { type, source, isDynamic, includeRemoved, limit }
+ * @returns {Array<object>} Ranked search results with source_name joined
+ */
 export function searchHooks(query, opts = {}) {
   const db = getDb();
   const { type, source, isDynamic, includeRemoved, limit = 20 } = opts;
@@ -330,6 +398,12 @@ export function searchHooks(query, opts = {}) {
   return db.prepare(sql).all(params);
 }
 
+/**
+ * Validate whether a hook name exists in the index.
+ * Returns VALID (with locations), REMOVED, or NOT_FOUND (with FTS-based suggestions).
+ * @param {string} hookName - Exact hook name to check
+ * @returns {{ status: string, hooks?: Array, similar?: Array }}
+ */
 export function validateHook(hookName) {
   const db = getDb();
 
@@ -377,6 +451,11 @@ export function validateHook(hookName) {
   return { status: 'NOT_FOUND', similar };
 }
 
+/**
+ * Get full hook details including code context. Looks up by numeric ID first, then by name.
+ * @param {string|number} idOrName - Hook ID or exact hook name
+ * @returns {object|undefined}
+ */
 export function getHookContext(idOrName) {
   const db = getDb();
 
@@ -401,6 +480,11 @@ export function getHookContext(idOrName) {
 
 // --- Block Registrations ---
 
+/**
+ * Insert or update a block registration. Uses content_hash for change detection.
+ * @param {object} data - Block data including source_id, file_path, line_number, block_name, etc.
+ * @returns {{ id: number, action: string }}
+ */
 export function upsertBlockRegistration(data) {
   const db = getDb();
   const tx = db.transaction((d) => {
@@ -448,6 +532,11 @@ export function upsertBlockRegistration(data) {
 
 // --- API Usages ---
 
+/**
+ * Insert or update a JS API usage record. Uses content_hash for change detection.
+ * @param {object} data - API data including source_id, file_path, line_number, api_call, namespace, method, etc.
+ * @returns {{ id: number, action: string }}
+ */
 export function upsertApiUsage(data) {
   const db = getDb();
   const tx = db.transaction((d) => {
@@ -494,11 +583,24 @@ export function upsertApiUsage(data) {
 
 // --- Indexed Files ---
 
+/**
+ * Get the indexed file record for mtime/hash comparison.
+ * @param {number} sourceId
+ * @param {string} filePath
+ * @returns {object|undefined}
+ */
 export function getIndexedFile(sourceId, filePath) {
   const db = getDb();
   return stmt(db, 'SELECT * FROM indexed_files WHERE source_id = ? AND file_path = ?').get(sourceId, filePath);
 }
 
+/**
+ * Track a file as indexed with its mtime and content hash.
+ * @param {number} sourceId
+ * @param {string} filePath
+ * @param {number} mtimeMs
+ * @param {string} contentHash
+ */
 export function upsertIndexedFile(sourceId, filePath, mtimeMs, contentHash) {
   const db = getDb();
   stmt(db, `
@@ -511,6 +613,10 @@ export function upsertIndexedFile(sourceId, filePath, mtimeMs, contentHash) {
 
 // --- FTS Rebuild ---
 
+/**
+ * Rebuild all FTS5 indexes from the content tables.
+ * Useful for recovery when FTS gets out of sync.
+ */
 export function rebuildFtsIndex() {
   const db = getDb();
   const tx = db.transaction(() => {
@@ -540,6 +646,10 @@ export function rebuildFtsIndex() {
 
 // --- Stats ---
 
+/**
+ * Get overall and per-source indexing statistics.
+ * @returns {{ totals: object, per_source: Array<object> }}
+ */
 export function getStats() {
   const db = getDb();
   const sources = stmt(db, 'SELECT COUNT(*) as count FROM sources').get();
@@ -572,6 +682,13 @@ export function getStats() {
 
 // --- Search block APIs ---
 
+/**
+ * Full-text search for block registrations and API usages.
+ * Uses FTS5 column filters to match only structured columns (not code_context).
+ * @param {string} query - Search keywords
+ * @param {object} [opts] - { limit }
+ * @returns {{ blocks: Array<object>, apis: Array<object> }}
+ */
 export function searchBlockApis(query, opts = {}) {
   const db = getDb();
   const { limit = 20 } = opts;

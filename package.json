@@ -1,6 +1,6 @@
 {
   "name": "wp-devdocs-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server that indexes WordPress plugin hooks (PHP + JS/TS) and exposes them as queryable tools to Claude Code",
   "type": "module",
   "engines": {
@@ -11,11 +11,11 @@
     "wp-devdocs-mcp": "./src/mcp-entry.js"
   },
   "scripts": {
-    "start": "node src/mcp-entry.js"
+    "start": "node src/mcp-entry.js",
+    "test": "node test/search-test.js",
+    "lint": "eslint src/ bin/"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
-    "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^11.8.2",
     "commander": "^13.1.0",
@@ -23,6 +23,12 @@
     "fast-glob": "^3.3.3",
     "simple-git": "^3.27.0",
     "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@eslint/js": "^9.39.3",
+    "@google/generative-ai": "^0.24.1",
+    "eslint": "^9.39.3"
   },
   "license": "MIT"
 }

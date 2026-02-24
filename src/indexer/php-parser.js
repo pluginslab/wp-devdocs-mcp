@@ -49,7 +49,7 @@ export function parsePhpFile(content, filePath, sourceId) {
     const hookName = cleanHookName(rawName);
     if (!hookName) continue;
 
-    const isDynamic = rawName.includes('$') || rawName.includes('.') && !rawName.startsWith("'") && !rawName.startsWith('"');
+    const isDynamic = rawName.includes('$') || (rawName.includes('.') && !rawName.startsWith("'") && !rawName.startsWith('"'));
 
     const lineNumber = getLineNumber(content, match.index);
     const lineIndex = lineNumber - 1;

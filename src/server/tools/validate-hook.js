@@ -9,6 +9,11 @@ export const validateHookSchema = {
   },
 };
 
+/**
+ * MCP tool handler — validate if a hook name exists in indexed sources.
+ * @param {object} args - { hook_name }
+ * @returns {{ content: Array<{ type: string, text: string }>, isError?: boolean }}
+ */
 export function handleValidateHook(args) {
   try {
     const result = validateHook(args.hook_name);
