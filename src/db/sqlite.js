@@ -43,7 +43,8 @@ function initDb(db) {
       local_path TEXT,
       token_env_var TEXT,
       branch TEXT DEFAULT 'main',
-      enabled INTEGER DEFAULT 1
+      enabled INTEGER DEFAULT 1,
+      content_type TEXT DEFAULT 'source'
     );
 
     CREATE TABLE IF NOT EXISTS hooks (
@@ -147,7 +148,59 @@ function initDb(db) {
       content='api_usages',
       content_rowid='id'
     );
+
+    CREATE TABLE IF NOT EXISTS docs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      title TEXT NOT NULL,
+      doc_type TEXT NOT NULL,
+      category TEXT,
+      subcategory TEXT,
+      description TEXT,
+      content TEXT NOT NULL,
+      code_examples TEXT,
+      metadata TEXT,
+      content_hash TEXT,
+      status TEXT DEFAULT 'active',
+      first_seen_at TEXT DEFAULT (datetime('now')),
+      last_seen_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(source_id, file_path)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_docs_source_id ON docs(source_id);
+    CREATE INDEX IF NOT EXISTS idx_docs_slug ON docs(slug);
+    CREATE INDEX IF NOT EXISTS idx_docs_doc_type ON docs(doc_type);
+    CREATE INDEX IF NOT EXISTS idx_docs_category ON docs(category);
+    CREATE INDEX IF NOT EXISTS idx_docs_status ON docs(status);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+      title,
+      slug,
+      doc_type,
+      category,
+      description,
+      content,
+      content='docs',
+      content_rowid='id',
+      tokenize='porter unicode61'
+    );
   `);
+
+  // Migration: add content_type to sources if missing (for existing databases)
+  try {
+    db.exec(`ALTER TABLE sources ADD COLUMN content_type TEXT DEFAULT 'source'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Migration: add last_indexed_at to sources if missing
+  try {
+    db.exec(`ALTER TABLE sources ADD COLUMN last_indexed_at TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 // --- Prepared statement cache ---
@@ -176,8 +229,8 @@ function stmt(db, sql) {
 export function addSource(data) {
   const db = getDb();
   return stmt(db, `
-    INSERT INTO sources (name, type, repo_url, subfolder, local_path, token_env_var, branch, enabled)
-    VALUES (@name, @type, @repo_url, @subfolder, @local_path, @token_env_var, @branch, @enabled)
+    INSERT INTO sources (name, type, repo_url, subfolder, local_path, token_env_var, branch, enabled, content_type)
+    VALUES (@name, @type, @repo_url, @subfolder, @local_path, @token_env_var, @branch, @enabled, @content_type)
   `).run({
     name: data.name,
     type: data.type,
@@ -187,6 +240,7 @@ export function addSource(data) {
     token_env_var: data.token_env_var || null,
     branch: data.branch || 'main',
     enabled: data.enabled !== undefined ? (data.enabled ? 1 : 0) : 1,
+    content_type: data.content_type || 'source',
   });
 }
 
@@ -233,10 +287,17 @@ export function removeSource(name) {
     stmt(db, 'DELETE FROM hooks_fts WHERE rowid IN (SELECT id FROM hooks WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM block_registrations_fts WHERE rowid IN (SELECT id FROM block_registrations WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM api_usages_fts WHERE rowid IN (SELECT id FROM api_usages WHERE source_id = ?)').run(source.id);
+    stmt(db, 'DELETE FROM docs_fts WHERE rowid IN (SELECT id FROM docs WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM sources WHERE name = ?').run(name);
   });
   tx();
   return source;
+}
+
+export function getActiveDocId(sourceId, filePath) {
+  const db = getDb();
+  const row = stmt(db, "SELECT id FROM docs WHERE source_id = ? AND file_path = ? AND status = 'active'").get(sourceId, filePath);
+  return row ? row.id : null;
 }
 
 /**
@@ -248,6 +309,11 @@ export function isSourceIndexed(sourceId) {
   const db = getDb();
   const row = stmt(db, 'SELECT COUNT(*) as count FROM indexed_files WHERE source_id = ?').get(sourceId);
   return row.count > 0;
+}
+
+export function updateSourceLastIndexed(sourceId) {
+  const db = getDb();
+  stmt(db, "UPDATE sources SET last_indexed_at = datetime('now') WHERE id = ?").run(sourceId);
 }
 
 // --- Hooks ---
@@ -640,6 +706,13 @@ export function rebuildFtsIndex() {
       INSERT INTO api_usages_fts(rowid, api_call, namespace, method, code_context)
       SELECT id, api_call, namespace, method, code_context FROM api_usages
     `);
+
+    // Rebuild docs FTS
+    db.exec('DELETE FROM docs_fts');
+    db.exec(`
+      INSERT INTO docs_fts(rowid, title, slug, doc_type, category, description, content)
+      SELECT id, title, slug, doc_type, category, description, content FROM docs
+    `);
   });
   tx();
 }
@@ -653,17 +726,19 @@ export function rebuildFtsIndex() {
 export function getStats() {
   const db = getDb();
   const sources = stmt(db, 'SELECT COUNT(*) as count FROM sources').get();
-  const hooks = stmt(db, 'SELECT COUNT(*) as count FROM hooks WHERE status = \'active\'').get();
-  const removedHooks = stmt(db, 'SELECT COUNT(*) as count FROM hooks WHERE status = \'removed\'').get();
+  const hooks = stmt(db, "SELECT COUNT(*) as count FROM hooks WHERE status = 'active'").get();
+  const removedHooks = stmt(db, "SELECT COUNT(*) as count FROM hooks WHERE status = 'removed'").get();
   const blocks = stmt(db, 'SELECT COUNT(*) as count FROM block_registrations').get();
   const apis = stmt(db, 'SELECT COUNT(*) as count FROM api_usages').get();
+  const docs = stmt(db, "SELECT COUNT(*) as count FROM docs WHERE status = 'active'").get();
 
   const perSource = db.prepare(`
-    SELECT s.name,
+    SELECT s.name, s.content_type,
       (SELECT COUNT(*) FROM hooks WHERE source_id = s.id AND status = 'active') AS hooks,
       (SELECT COUNT(*) FROM hooks WHERE source_id = s.id AND status = 'removed') AS removed_hooks,
       (SELECT COUNT(*) FROM block_registrations WHERE source_id = s.id) AS blocks,
       (SELECT COUNT(*) FROM api_usages WHERE source_id = s.id) AS apis,
+      (SELECT COUNT(*) FROM docs WHERE source_id = s.id AND status = 'active') AS docs,
       (SELECT COUNT(*) FROM indexed_files WHERE source_id = s.id) AS files
     FROM sources s ORDER BY s.name
   `).all();
@@ -675,6 +750,7 @@ export function getStats() {
       removed_hooks: removedHooks.count,
       block_registrations: blocks.count,
       api_usages: apis.count,
+      docs: docs.count,
     },
     per_source: perSource,
   };
@@ -734,4 +810,186 @@ export function searchBlockApis(query, opts = {}) {
   }
 
   return { blocks, apis };
+}
+
+// --- Docs ---
+
+export function upsertDoc(data) {
+  const db = getDb();
+  const upsertTx = db.transaction((d) => {
+    const existing = stmt(db, `
+      SELECT id, content_hash FROM docs
+      WHERE source_id = @source_id AND file_path = @file_path
+    `).get(d);
+
+    if (existing) {
+      if (existing.content_hash === d.content_hash) {
+        stmt(db, "UPDATE docs SET last_seen_at = datetime('now'), status = 'active' WHERE id = ?").run(existing.id);
+        return { id: existing.id, action: 'skipped' };
+      }
+      stmt(db, `
+        UPDATE docs SET
+          slug = @slug, title = @title, doc_type = @doc_type, category = @category,
+          subcategory = @subcategory, description = @description, content = @content,
+          code_examples = @code_examples, metadata = @metadata, content_hash = @content_hash,
+          status = 'active', last_seen_at = datetime('now')
+        WHERE id = @id
+      `).run({ ...d, id: existing.id });
+      stmt(db, 'DELETE FROM docs_fts WHERE rowid = ?').run(existing.id);
+      stmt(db, `
+        INSERT INTO docs_fts(rowid, title, slug, doc_type, category, description, content)
+        VALUES (@id, @title, @slug, @doc_type, @category, @description, @content)
+      `).run({ ...d, id: existing.id });
+      return { id: existing.id, action: 'updated' };
+    }
+
+    const result = stmt(db, `
+      INSERT INTO docs (
+        source_id, file_path, slug, title, doc_type, category, subcategory,
+        description, content, code_examples, metadata, content_hash, status
+      ) VALUES (
+        @source_id, @file_path, @slug, @title, @doc_type, @category, @subcategory,
+        @description, @content, @code_examples, @metadata, @content_hash, 'active'
+      )
+    `).run(d);
+
+    stmt(db, `
+      INSERT INTO docs_fts(rowid, title, slug, doc_type, category, description, content)
+      VALUES (@id, @title, @slug, @doc_type, @category, @description, @content)
+    `).run({ ...d, id: result.lastInsertRowid });
+
+    return { id: result.lastInsertRowid, action: 'inserted' };
+  });
+
+  return upsertTx(data);
+}
+
+export function markDocsRemoved(sourceId, activeDocIds) {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const allDocs = stmt(db, `
+      SELECT id FROM docs WHERE source_id = ? AND status = 'active'
+    `).all(sourceId);
+
+    const activeSet = new Set(activeDocIds.map(Number));
+    const toRemove = allDocs.filter(d => !activeSet.has(d.id));
+
+    const removeStmt = stmt(db, `
+      UPDATE docs SET status = 'removed' WHERE id = ?
+    `);
+
+    for (const d of toRemove) {
+      removeStmt.run(d.id);
+    }
+
+    return toRemove.length;
+  });
+
+  return tx();
+}
+
+export function searchDocs(query, opts = {}) {
+  const db = getDb();
+  const { doc_type, category, source, limit = 20 } = opts;
+
+  const ftsQuery = query.replace(/['"(){}[\]*:^~!]/g, ' ').trim();
+  if (!ftsQuery) return [];
+
+  const terms = ftsQuery.split(/\s+/).filter(Boolean).map(t => `"${t}"*`).join(' ');
+
+  let sql = `
+    SELECT d.id, d.source_id, d.file_path, d.slug, d.title, d.doc_type, d.category,
+      d.subcategory, d.description, d.status, s.name AS source_name,
+      bm25(docs_fts, 10, 5, 3, 2, 5, 1) AS rank
+    FROM docs_fts
+    JOIN docs d ON d.id = docs_fts.rowid
+    JOIN sources s ON s.id = d.source_id
+    WHERE docs_fts MATCH @terms
+      AND d.status = 'active'
+  `;
+
+  const params = { terms };
+
+  if (doc_type) {
+    sql += ` AND d.doc_type = @doc_type`;
+    params.doc_type = doc_type;
+  }
+  if (category) {
+    sql += ` AND d.category = @category`;
+    params.category = category;
+  }
+  if (source) {
+    sql += ` AND s.name = @source`;
+    params.source = source;
+  }
+
+  sql += ` ORDER BY rank LIMIT @limit`;
+  params.limit = limit;
+
+  try {
+    return db.prepare(sql).all(params);
+  } catch {
+    return [];
+  }
+}
+
+export function getDoc(idOrSlug) {
+  const db = getDb();
+
+  if (typeof idOrSlug === 'number' || /^\d+$/.test(idOrSlug)) {
+    return stmt(db, `
+      SELECT d.*, s.name AS source_name FROM docs d
+      JOIN sources s ON s.id = d.source_id
+      WHERE d.id = ?
+    `).get(Number(idOrSlug));
+  }
+
+  return stmt(db, `
+    SELECT d.*, s.name AS source_name FROM docs d
+    JOIN sources s ON s.id = d.source_id
+    WHERE d.slug = ? AND d.status = 'active'
+    ORDER BY d.last_seen_at DESC LIMIT 1
+  `).get(idOrSlug);
+}
+
+export function getDocCategoryCounts() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT category, COUNT(*) as count
+    FROM docs WHERE status = 'active'
+    GROUP BY category ORDER BY category
+  `).all();
+}
+
+export function listDocs(opts = {}) {
+  const db = getDb();
+  const { doc_type, category, source, limit = 50 } = opts;
+
+  let sql = `
+    SELECT d.id, d.slug, d.title, d.doc_type, d.category, d.subcategory,
+      d.description, s.name AS source_name
+    FROM docs d
+    JOIN sources s ON s.id = d.source_id
+    WHERE d.status = 'active'
+  `;
+
+  const params = {};
+
+  if (doc_type) {
+    sql += ` AND d.doc_type = @doc_type`;
+    params.doc_type = doc_type;
+  }
+  if (category) {
+    sql += ` AND d.category = @category`;
+    params.category = category;
+  }
+  if (source) {
+    sql += ` AND s.name = @source`;
+    params.source = source;
+  }
+
+  sql += ` ORDER BY d.category, d.title LIMIT @limit`;
+  params.limit = limit;
+
+  return db.prepare(sql).all(params);
 }

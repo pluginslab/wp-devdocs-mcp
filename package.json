@@ -1,7 +1,7 @@
 {
   "name": "wp-devdocs-mcp",
-  "version": "1.0.1",
-  "description": "MCP server that indexes WordPress plugin hooks (PHP + JS/TS) and exposes them as queryable tools to Claude Code",
+  "version": "2.0.0",
+  "description": "MCP server that indexes WordPress hooks, blocks, APIs, and official documentation — exposing them as queryable tools to AI assistants",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node src/mcp-entry.js",
-    "test": "node test/search-test.js",
+    "test": "node test/docs-test.js",
     "lint": "eslint src/ bin/"
   },
   "dependencies": {

@@ -8,6 +8,7 @@ import {
   removeSource,
   searchHooks,
   searchBlockApis,
+  searchDocs,
   validateHook,
   getStats,
   rebuildFtsIndex,
@@ -20,8 +21,30 @@ const program = new Command();
 
 program
   .name('wp-hooks')
-  .description('WordPress hook indexer and search CLI')
-  .version('1.0.1');
+  .description('WordPress hook indexer, doc searcher, and MCP server CLI')
+  .version('2.0.0');
+
+function printIndexStats(stats) {
+  console.log(`  Files processed:   ${stats.files_processed}`);
+  console.log(`  Files skipped:     ${stats.files_skipped}`);
+  console.log(`  Hooks inserted:    ${stats.hooks_inserted}`);
+  console.log(`  Hooks updated:     ${stats.hooks_updated}`);
+  console.log(`  Hooks unchanged:   ${stats.hooks_skipped}`);
+  console.log(`  Hooks removed:     ${stats.hooks_removed}`);
+  console.log(`  Blocks indexed:    ${stats.blocks_indexed}`);
+  console.log(`  APIs indexed:      ${stats.apis_indexed}`);
+  console.log(`  Docs inserted:     ${stats.docs_inserted}`);
+  console.log(`  Docs updated:      ${stats.docs_updated}`);
+  console.log(`  Docs unchanged:    ${stats.docs_skipped}`);
+  console.log(`  Docs removed:      ${stats.docs_removed}`);
+
+  if (stats.errors.length > 0) {
+    console.log(`\n  Errors (${stats.errors.length}):`);
+    for (const err of stats.errors) {
+      console.log(`    - ${err}`);
+    }
+  }
+}
 
 // --- source:add ---
 program
@@ -34,6 +57,7 @@ program
   .option('--path <path>', 'Local folder path (for local-folder type)')
   .option('--token-env <var>', 'Environment variable name containing GitHub token')
   .option('--branch <branch>', 'Git branch (default: main)', 'main')
+  .option('--content-type <type>', 'Content type: source or docs (default: source)', 'source')
   .option('--no-index', 'Skip automatic indexing after adding')
   .action(async (opts) => {
     try {
@@ -51,29 +75,16 @@ program
         local_path: opts.path || null,
         token_env_var: opts.tokenEnv || null,
         branch: opts.branch,
+        content_type: opts.contentType,
       });
 
-      console.log(`Source "${opts.name}" added successfully.`);
+      console.log(`Source "${opts.name}" added successfully (content_type: ${opts.contentType}).`);
 
       if (opts.index) {
         console.log(`\nIndexing "${opts.name}"...`);
         const stats = await indexSources({ sourceName: opts.name });
-
         console.log('\nIndexing complete:');
-        console.log(`  Files processed:   ${stats.files_processed}`);
-        console.log(`  Files skipped:     ${stats.files_skipped}`);
-        console.log(`  Hooks inserted:    ${stats.hooks_inserted}`);
-        console.log(`  Hooks updated:     ${stats.hooks_updated}`);
-        console.log(`  Hooks unchanged:   ${stats.hooks_skipped}`);
-        console.log(`  Blocks indexed:    ${stats.blocks_indexed}`);
-        console.log(`  APIs indexed:      ${stats.apis_indexed}`);
-
-        if (stats.errors.length > 0) {
-          console.log(`\n  Errors (${stats.errors.length}):`);
-          for (const err of stats.errors) {
-            console.log(`    - ${err}`);
-          }
-        }
+        printIndexStats(stats);
       }
     } catch (err) {
       console.error(`Error: ${err.message}`);
@@ -84,6 +95,20 @@ program
   });
 
 // --- source:list ---
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return 'never';
+  const diff = Date.now() - new Date(isoString + 'Z').getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 program
   .command('source:list')
   .description('List all configured sources')
@@ -95,15 +120,17 @@ program
         return;
       }
 
-      console.log(`\n${'Name'.padEnd(25)} ${'Type'.padEnd(18)} ${'Branch'.padEnd(10)} ${'Indexed'.padEnd(10)} Details`);
-      console.log('-'.repeat(95));
+      console.log(`\n${'Name'.padEnd(25)} ${'Type'.padEnd(18)} ${'Content'.padEnd(10)} ${'Branch'.padEnd(10)} ${'Indexed'.padEnd(10)} ${'Last indexed'.padEnd(14)} Details`);
+      console.log('-'.repeat(124));
 
       for (const s of sources) {
         const details = s.repo_url || s.local_path || '';
         const subfolder = s.subfolder ? ` [${s.subfolder}]` : '';
         const indexed = isSourceIndexed(s.id) ? 'yes' : 'no';
+        const contentType = s.content_type || 'source';
+        const lastIndexed = formatRelativeTime(s.last_indexed_at);
         console.log(
-          `${s.name.padEnd(25)} ${s.type.padEnd(18)} ${(s.branch || 'main').padEnd(10)} ${indexed.padEnd(10)} ${details}${subfolder}`
+          `${s.name.padEnd(25)} ${s.type.padEnd(18)} ${contentType.padEnd(10)} ${(s.branch || 'main').padEnd(10)} ${indexed.padEnd(10)} ${lastIndexed.padEnd(14)} ${details}${subfolder}`
         );
       }
       console.log('');
@@ -150,21 +177,7 @@ program
 
       console.log('\nIndexing complete:');
       console.log(`  Sources processed: ${stats.sources_processed}`);
-      console.log(`  Files processed:   ${stats.files_processed}`);
-      console.log(`  Files skipped:     ${stats.files_skipped}`);
-      console.log(`  Hooks inserted:    ${stats.hooks_inserted}`);
-      console.log(`  Hooks updated:     ${stats.hooks_updated}`);
-      console.log(`  Hooks unchanged:   ${stats.hooks_skipped}`);
-      console.log(`  Hooks removed:     ${stats.hooks_removed}`);
-      console.log(`  Blocks indexed:    ${stats.blocks_indexed}`);
-      console.log(`  APIs indexed:      ${stats.apis_indexed}`);
-
-      if (stats.errors.length > 0) {
-        console.log(`\n  Errors (${stats.errors.length}):`);
-        for (const err of stats.errors) {
-          console.log(`    - ${err}`);
-        }
-      }
+      printIndexStats(stats);
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(1);
@@ -265,6 +278,47 @@ program
     }
   });
 
+// --- search-docs ---
+program
+  .command('search-docs <query>')
+  .description('Search indexed WordPress documentation')
+  .option('--type <type>', 'Filter by doc type (guide, tutorial, reference, api, howto, faq, general)')
+  .option('--category <cat>', 'Filter by category (block-editor, plugins, rest-api, wp-cli, admin)')
+  .option('--source <name>', 'Filter by source name')
+  .option('--limit <n>', 'Max results', '20')
+  .action((query, opts) => {
+    try {
+      const results = searchDocs(query, {
+        doc_type: opts.type,
+        category: opts.category,
+        source: opts.source,
+        limit: parseInt(opts.limit, 10),
+      });
+
+      if (results.length === 0) {
+        console.log(`No documentation found matching "${query}".`);
+        return;
+      }
+
+      console.log(`\nFound ${results.length} doc(s) matching "${query}":\n`);
+
+      for (const d of results) {
+        console.log(`  ${d.title}`);
+        console.log(`    Type: ${d.doc_type} | Category: ${d.category || 'general'} | Source: ${d.source_name}`);
+        console.log(`    Slug: ${d.slug}`);
+        if (d.subcategory) console.log(`    Subcategory: ${d.subcategory}`);
+        if (d.description) console.log(`    Description: ${d.description.slice(0, 150)}${d.description.length > 150 ? '...' : ''}`);
+        console.log(`    ID: ${d.id}`);
+        console.log('');
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
 // --- validate ---
 program
   .command('validate <hook-name>')
@@ -316,14 +370,15 @@ program
       console.log(`  Removed hooks:       ${stats.totals.removed_hooks}`);
       console.log(`  Block registrations: ${stats.totals.block_registrations}`);
       console.log(`  API usages:          ${stats.totals.api_usages}`);
+      console.log(`  Documentation pages: ${stats.totals.docs}`);
 
       if (stats.per_source.length > 0) {
         console.log('\nPer Source:');
-        console.log(`  ${'Name'.padEnd(25)} ${'Hooks'.padEnd(8)} ${'Removed'.padEnd(10)} ${'Blocks'.padEnd(8)} ${'APIs'.padEnd(8)} Files`);
-        console.log('  ' + '-'.repeat(75));
+        console.log(`  ${'Name'.padEnd(25)} ${'Type'.padEnd(8)} ${'Hooks'.padEnd(8)} ${'Removed'.padEnd(10)} ${'Blocks'.padEnd(8)} ${'APIs'.padEnd(8)} ${'Docs'.padEnd(8)} Files`);
+        console.log('  ' + '-'.repeat(90));
         for (const s of stats.per_source) {
           console.log(
-            `  ${s.name.padEnd(25)} ${String(s.hooks).padEnd(8)} ${String(s.removed_hooks).padEnd(10)} ${String(s.blocks).padEnd(8)} ${String(s.apis).padEnd(8)} ${s.files}`
+            `  ${s.name.padEnd(25)} ${(s.content_type || 'source').padEnd(8)} ${String(s.hooks).padEnd(8)} ${String(s.removed_hooks).padEnd(10)} ${String(s.blocks).padEnd(8)} ${String(s.apis).padEnd(8)} ${String(s.docs).padEnd(8)} ${s.files}`
           );
         }
       }
@@ -343,7 +398,7 @@ program
   .action(() => {
     try {
       rebuildFtsIndex();
-      console.log('FTS indexes rebuilt successfully.');
+      console.log('FTS indexes rebuilt successfully (hooks, blocks, APIs, docs).');
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(1);
