@@ -316,6 +316,17 @@ export function updateSourceLastIndexed(sourceId) {
   stmt(db, "UPDATE sources SET last_indexed_at = datetime('now') WHERE id = ?").run(sourceId);
 }
 
+export function getStaleSources(maxAgeMs) {
+  const db = getDb();
+  const cutoffSeconds = Math.floor(maxAgeMs / 1000);
+  return stmt(db, `
+    SELECT * FROM sources
+    WHERE enabled = 1
+      AND (last_indexed_at IS NULL OR last_indexed_at < datetime('now', '-' || ? || ' seconds'))
+    ORDER BY name
+  `).all(cutoffSeconds);
+}
+
 // --- Hooks ---
 
 /**

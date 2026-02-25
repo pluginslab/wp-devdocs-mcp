@@ -8,7 +8,8 @@
   },
   "bin": {
     "wp-hooks": "./bin/wp-hooks.js",
-    "wp-devdocs-mcp": "./src/mcp-entry.js"
+    "wp-devdocs-mcp": "./src/mcp-entry.js",
+    "wp-mcp": "./src/mcp-entry.js"
   },
   "scripts": {
     "start": "node src/mcp-entry.js",

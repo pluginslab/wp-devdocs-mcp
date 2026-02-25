@@ -12,7 +12,8 @@ import { getDocSchema, handleGetDoc } from './server/tools/get-doc.js';
 import { listDocsSchema, handleListDocs } from './server/tools/list-docs.js';
 
 // Initialize DB on import (side effect)
-import { getDb } from './db/sqlite.js';
+import { getDb, getStaleSources } from './db/sqlite.js';
+import { indexSources } from './indexer/index-manager.js';
 
 const server = new McpServer({
   name: 'wp-devdocs-mcp',
@@ -80,3 +81,28 @@ try {
 // Start
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// Background auto-update of stale sources (fire-and-forget)
+async function autoUpdate() {
+  try {
+    const staleSources = getStaleSources(24 * 60 * 60 * 1000);
+    if (staleSources.length === 0) return;
+
+    process.stderr.write(`Auto-updating ${staleSources.length} stale source(s)...\n`);
+
+    for (const source of staleSources) {
+      try {
+        await indexSources({ sourceName: source.name });
+        process.stderr.write(`  Updated: ${source.name}\n`);
+      } catch (err) {
+        process.stderr.write(`  Error updating ${source.name}: ${err.message}\n`);
+      }
+    }
+
+    process.stderr.write(`Auto-update complete.\n`);
+  } catch (err) {
+    process.stderr.write(`Auto-update failed: ${err.message}\n`);
+  }
+}
+
+autoUpdate();

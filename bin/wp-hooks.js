@@ -13,9 +13,11 @@ import {
   getStats,
   rebuildFtsIndex,
   isSourceIndexed,
+  getStaleSources,
   closeDb,
 } from '../src/db/sqlite.js';
 import { indexSources } from '../src/indexer/index-manager.js';
+import { getPreset, listPresets } from '../src/presets.js';
 
 const program = new Command();
 
@@ -162,6 +164,74 @@ program
     }
   });
 
+// --- quick-add ---
+program
+  .command('quick-add <preset>')
+  .description('Add and index a pre-configured source. Available presets: ' + listPresets().map(p => p.name).join(', '))
+  .option('--no-index', 'Skip automatic indexing after adding')
+  .action(async (presetName, opts) => {
+    try {
+      const preset = getPreset(presetName);
+      if (!preset) {
+        console.error(`Unknown preset: "${presetName}". Available: ${listPresets().map(p => p.name).join(', ')}`);
+        process.exit(1);
+      }
+
+      const existing = getSource(preset.name);
+      if (existing) {
+        console.log(`Source "${preset.name}" already exists. Skipping add, running index...`);
+      } else {
+        addSource(preset);
+        console.log(`Source "${preset.name}" added (${preset.content_type}).`);
+      }
+
+      if (opts.index) {
+        console.log(`\nIndexing "${preset.name}"...`);
+        const stats = await indexSources({ sourceName: preset.name });
+        console.log('\nIndexing complete:');
+        printIndexStats(stats);
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
+// --- quick-add-all ---
+program
+  .command('quick-add-all')
+  .description('Add and index all pre-configured sources')
+  .option('--no-index', 'Skip automatic indexing after adding')
+  .action(async (opts) => {
+    try {
+      const presets = listPresets();
+      for (const preset of presets) {
+        const existing = getSource(preset.name);
+        if (existing) {
+          console.log(`Source "${preset.name}" already exists — skipping.`);
+          continue;
+        }
+        addSource(preset);
+        console.log(`Added: ${preset.name} (${preset.content_type})`);
+      }
+
+      if (opts.index) {
+        console.log('\nIndexing all sources...');
+        const stats = await indexSources();
+        console.log('\nIndexing complete:');
+        console.log(`  Sources processed: ${stats.sources_processed}`);
+        printIndexStats(stats);
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
 // --- index ---
 program
   .command('index')
@@ -178,6 +248,59 @@ program
       console.log('\nIndexing complete:');
       console.log(`  Sources processed: ${stats.sources_processed}`);
       printIndexStats(stats);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
+// --- update ---
+program
+  .command('update')
+  .description('Fetch and re-index stale sources (or all with --force)')
+  .option('--source <name>', 'Update a specific source only')
+  .option('--force', 'Re-index regardless of staleness', false)
+  .action(async (opts) => {
+    try {
+      let sources;
+
+      if (opts.source) {
+        const source = getSource(opts.source);
+        if (!source) {
+          console.error(`Source not found: ${opts.source}`);
+          process.exit(1);
+        }
+        if (!source.enabled) {
+          console.error(`Source "${opts.source}" is disabled.`);
+          process.exit(1);
+        }
+        sources = [source];
+      } else if (opts.force) {
+        sources = listSources().filter(s => s.enabled);
+      } else {
+        sources = getStaleSources(24 * 60 * 60 * 1000);
+      }
+
+      if (sources.length === 0) {
+        console.log('All sources are up to date. Use --force to re-index anyway.');
+        return;
+      }
+
+      console.log(`Updating ${sources.length} source(s)...\n`);
+
+      for (const source of sources) {
+        console.log(`Updating: ${source.name}`);
+        const stats = await indexSources({
+          sourceName: source.name,
+          force: opts.force,
+        });
+        printIndexStats(stats);
+        console.log('');
+      }
+
+      console.log('Update complete.');
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(1);
