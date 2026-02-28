@@ -8,7 +8,7 @@ import {
   upsertIndexedFile,
   getActiveDocId,
 } from '../db/sqlite.js';
-import { DocParserRegistry } from './parsers/base-doc-parser.js';
+import { DocParserRegistry, extractFrontmatter } from './parsers/base-doc-parser.js';
 import { BlockEditorParser } from './parsers/block-editor-parser.js';
 import { PluginHandbookParser } from './parsers/plugin-handbook-parser.js';
 import { RestApiParser } from './parsers/rest-api-parser.js';
@@ -65,44 +65,31 @@ export async function indexDocsSource(source, localPath, force, stats) {
       const fileStat = statSync(fullPath);
       const mtimeMs = fileStat.mtimeMs;
 
+      // Cache indexed file lookup (used for both mtime and content hash checks)
+      const indexed = force ? null : getIndexedFile(source.id, file);
+
       // Check mtime for incremental skip
-      if (!force) {
-        const indexed = getIndexedFile(source.id, file);
-        if (indexed && indexed.mtime_ms === mtimeMs) {
-          const docId = getActiveDocId(source.id, file);
-          if (docId) activeDocIds.push(docId);
-          stats.files_skipped++;
-          continue;
-        }
+      if (indexed && indexed.mtime_ms === mtimeMs) {
+        const docId = getActiveDocId(source.id, file);
+        if (docId) activeDocIds.push(docId);
+        stats.files_skipped++;
+        continue;
       }
 
       const content = readFileSync(fullPath, 'utf-8');
       const contentHash = createHash('sha256').update(content).digest('hex').slice(0, 16);
 
       // Skip if content hash matches
-      if (!force) {
-        const indexed = getIndexedFile(source.id, file);
-        if (indexed && indexed.content_hash === contentHash) {
-          const docId = getActiveDocId(source.id, file);
-          if (docId) activeDocIds.push(docId);
-          upsertIndexedFile(source.id, file, mtimeMs, contentHash);
-          stats.files_skipped++;
-          continue;
-        }
+      if (indexed && indexed.content_hash === contentHash) {
+        const docId = getActiveDocId(source.id, file);
+        if (docId) activeDocIds.push(docId);
+        upsertIndexedFile(source.id, file, mtimeMs, contentHash);
+        stats.files_skipped++;
+        continue;
       }
 
       // Extract frontmatter for parser selection
-      const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      const frontmatter = {};
-      if (fmMatch) {
-        for (const line of fmMatch[1].split('\n')) {
-          const sep = line.indexOf(':');
-          if (sep === -1) continue;
-          const key = line.slice(0, sep).trim();
-          const val = line.slice(sep + 1).trim().replace(/^["']|["']$/g, '');
-          if (key) frontmatter[key] = val;
-        }
-      }
+      const { frontmatter } = extractFrontmatter(content);
 
       // Select parser
       const parser = registry.getParser(file, frontmatter, source.name);

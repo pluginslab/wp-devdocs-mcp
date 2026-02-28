@@ -129,6 +129,29 @@ export class BaseDocParser {
 }
 
 /**
+ * Standalone frontmatter extraction — usable without instantiating a parser.
+ * @param {string} content - Raw file content
+ * @returns {{ frontmatter: object, body: string }}
+ */
+export function extractFrontmatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return { frontmatter: {}, body: content };
+
+  const raw = match[1];
+  const frontmatter = {};
+  for (const line of raw.split('\n')) {
+    const sep = line.indexOf(':');
+    if (sep === -1) continue;
+    const key = line.slice(0, sep).trim();
+    const val = line.slice(sep + 1).trim().replace(/^["']|["']$/g, '');
+    if (key) frontmatter[key] = val;
+  }
+
+  const body = content.slice(match[0].length).trim();
+  return { frontmatter, body };
+}
+
+/**
  * Registry that selects the appropriate parser for a given file.
  * Parsers are checked in order — first match wins.
  */

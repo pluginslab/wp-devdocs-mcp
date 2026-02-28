@@ -31,11 +31,6 @@ export class RestApiParser extends BaseDocParser {
       }
     }
 
-    // Extract schema properties
-    const schemaProps = [];
-    const propRegex = /[`"](\w+)[`"]\s*(?:\(|:)\s*(?:\w+)/g;
-    // This is a loose heuristic — captures table-like field docs
-
     const metadata = {};
     if (endpoints.length > 0) metadata.endpoints = endpoints;
     if (Object.keys(frontmatter).length > 0) metadata.frontmatter = frontmatter;

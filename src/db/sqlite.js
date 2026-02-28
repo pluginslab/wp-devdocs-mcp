@@ -939,7 +939,8 @@ export function searchDocs(query, opts = {}) {
 
   try {
     return db.prepare(sql).all(params);
-  } catch {
+  } catch (err) {
+    console.error(`searchDocs FTS error: ${err.message}`);
     return [];
   }
 }

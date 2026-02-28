@@ -2,7 +2,7 @@ import { BaseDocParser } from './base-doc-parser.js';
 
 export class AdminHandbookParser extends BaseDocParser {
   canParse(filePath, frontmatter, sourceName) {
-    return sourceName.includes('admin');
+    return sourceName.includes('admin-handbook') || sourceName === 'admin';
   }
 
   parse(content, filePath, sourceId) {

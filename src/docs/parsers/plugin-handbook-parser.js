@@ -2,7 +2,7 @@ import { BaseDocParser } from './base-doc-parser.js';
 
 export class PluginHandbookParser extends BaseDocParser {
   canParse(filePath, frontmatter, sourceName) {
-    return sourceName.includes('plugin');
+    return sourceName.includes('plugin-handbook') || sourceName === 'plugin';
   }
 
   parse(content, filePath, sourceId) {

@@ -17,7 +17,7 @@ import { indexSources } from './indexer/index-manager.js';
 
 const server = new McpServer({
   name: 'wp-devdocs-mcp',
-  version: '2.0.0',
+  version: '1.1.0',
 });
 
 // Register tools
@@ -84,6 +84,7 @@ await server.connect(transport);
 
 // Background auto-update of stale sources (fire-and-forget)
 async function autoUpdate() {
+  if (process.env.WP_MCP_AUTO_UPDATE === 'false') return;
   try {
     const staleSources = getStaleSources(24 * 60 * 60 * 1000);
     if (staleSources.length === 0) return;
