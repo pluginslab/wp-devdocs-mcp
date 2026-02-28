@@ -8,6 +8,8 @@
 
 wp-devdocs-mcp is a local [MCP server](https://modelcontextprotocol.io/) that indexes every action, filter, block registration, and JS API call from WordPress, WooCommerce, Gutenberg, or any plugin you work with. It gives AI tools like Claude Code a verified database to search and validate against instead of relying on training data.
 
+Works with Claude Code, Cursor, Windsurf, and any MCP-compatible client.
+
 ## Why This Exists
 
 AI coding assistants are changing how we build WordPress plugins. Tools like Claude Code, Cursor, and Windsurf can scaffold entire plugins in minutes — but they all share the same blind spot: **hook names come from training data, not from the actual source code**.
@@ -45,6 +47,7 @@ No hallucination. No guessing. No debugging phantom hooks.
 | JS hooks | `addAction()`, `addFilter()`, `applyFilters()`, `doAction()` |
 | Block registrations | `registerBlockType()`, `registerBlockVariation()` |
 | JS API usages | `wp.blocks.*`, `wp.blockEditor.*`, `wp.data.*`, etc. |
+| Markdown documentation | Handbooks parsed into searchable pages *(since v2.0.0)* |
 
 **What the AI gets for each hook:**
 
@@ -64,11 +67,18 @@ No hallucination. No guessing. No debugging phantom hooks.
 git clone https://github.com/pluginslab/wp-devdocs-mcp.git
 cd wp-devdocs-mcp
 npm install
+
+# Add all preset sources at once (since v2.0.0)
+npx wp-hooks quick-add-all
+
+# Or add individual presets (since v2.0.0)
+npx wp-hooks quick-add wp-core
+npx wp-hooks quick-add woocommerce
+npx wp-hooks quick-add gutenberg-source
+npx wp-hooks quick-add plugin-handbook
 ```
 
-### Index Your First Source
-
-Each `source:add` command clones the repo and indexes it automatically:
+Or add sources manually (works in all versions):
 
 ```bash
 # WooCommerce (uses trunk branch)
@@ -82,9 +92,9 @@ npx wp-hooks source:add \
 
 That's it. 3,500+ hooks indexed in under a minute.
 
-### Connect to Claude Code
+### Connect to Your AI Assistant
 
-Add the MCP server to your Claude Code configuration. Create or edit `.mcp.json` in your project root:
+Add the MCP server to your configuration. Create or edit `.mcp.json` in your project root (or `~/.claude/.mcp.json` globally):
 
 ```json
 {
@@ -98,6 +108,23 @@ Add the MCP server to your Claude Code configuration. Create or edit `.mcp.json`
 ```
 
 Now when you ask Claude Code to write WordPress plugin code, it will automatically search and validate hook names against your indexed sources before generating code.
+
+The server auto-updates stale sources (>24h) in the background on each start. *(since v2.0.0)*
+
+## Available Presets *(since v2.0.0)*
+
+Pre-configured sources you can add with a single command:
+
+| Preset | What It Indexes |
+|--------|----------------|
+| `wp-core` | WordPress core hooks (wordpress-develop, trunk) |
+| `gutenberg-source` | Gutenberg plugin source code |
+| `gutenberg-docs` | Gutenberg/block editor documentation |
+| `woocommerce` | WooCommerce plugin hooks (plugins/woocommerce) |
+| `plugin-handbook` | Plugin developer handbook |
+| `rest-api-handbook` | REST API documentation |
+| `wp-cli-handbook` | WP-CLI reference |
+| `admin-handbook` | Advanced administration handbook |
 
 ## Indexing Sources
 
@@ -193,6 +220,18 @@ npx wp-hooks source:add \
   --path /path/to/wp-content/plugins/my-plugin
 ```
 
+### Documentation Sources *(since v2.0.0)*
+
+Index markdown handbooks and documentation alongside source code:
+
+```bash
+npx wp-hooks source:add \
+  --name my-docs \
+  --type github-public \
+  --repo https://github.com/org/docs-repo \
+  --content-type docs
+```
+
 ### Source Options
 
 | Option | Description |
@@ -204,50 +243,26 @@ npx wp-hooks source:add \
 | `--branch` | Git branch (default: `main` — use `trunk` for WordPress/WooCommerce repos) |
 | `--token-env` | Environment variable name holding a GitHub token (private repos) |
 | `--path` | Local folder path |
+| `--content-type` | `source` (default) or `docs` *(since v2.0.0)* |
 | `--no-index` | Register the source without indexing it yet |
 
-## CLI Reference
+## What Gets Indexed
 
-```
-npx wp-hooks source:add        Add a source and index it
-npx wp-hooks source:list       List all sources with indexed status
-npx wp-hooks source:remove     Remove a source and all its data
-npx wp-hooks index             Re-index all sources (or --source <name>)
-npx wp-hooks search <query>    Full-text search across hooks
-npx wp-hooks validate <name>   Check if a hook name exists (exit code 0/1)
-npx wp-hooks search-blocks <q> Search block registrations and JS API usages
-npx wp-hooks stats             Show hook/block/API counts per source
-npx wp-hooks rebuild-index     Rebuild full-text search indexes
-```
+**Source code** (`--content-type source`, default):
+- PHP hooks: `do_action()`, `apply_filters()`, `*_ref_array()` variants
+- JS hooks: `addAction()`, `addFilter()`, `applyFilters()`, `doAction()`
+- Block registrations: `registerBlockType()`, `registerBlockVariation()`
+- JS API usages: `wp.blocks.*`, `wp.blockEditor.*`, `wp.data.*`, etc.
 
-### CLI Examples
+**Documentation** (`--content-type docs`) *(since v2.0.0)*:
+- Markdown handbooks parsed into searchable pages with metadata, code examples, and categorization
+- Specialized parsers for block editor docs, plugin handbook, REST API reference, WP-CLI handbook, and admin handbook
 
-```bash
-# Search for checkout-related hooks
-npx wp-hooks search "woocommerce_checkout"
-
-# Search only filters
-npx wp-hooks search "woocommerce_product" --type filter
-
-# Validate a specific hook name
-npx wp-hooks validate "woocommerce_before_order_itemmeta"
-
-# Search for Gutenberg block APIs
-npx wp-hooks search-blocks "InspectorControls"
-
-# Re-index a specific source after updates
-npx wp-hooks index --source woocommerce
-
-# Force full re-index (ignore file modification cache)
-npx wp-hooks index --force
-
-# See what you have indexed
-npx wp-hooks stats
-```
+Each hook record includes: exact name, type, parameters, file path, line number, enclosing function/class, docblock, surrounding code context, and dynamic name detection.
 
 ## MCP Tools
 
-When connected to Claude Code (or any MCP-compatible client), four tools are available:
+Seven tools are exposed to your AI assistant (four original + three added in v2.0.0):
 
 ### `search_hooks`
 
@@ -265,14 +280,89 @@ Returns the full code window around a hook: the line itself, 8 lines before, 4 l
 
 Searches block registrations (`registerBlockType`, etc.) and JavaScript API usages (`wp.blockEditor.*`, `wp.data.*`, etc.). Only matches on structured fields (block name, API call, namespace) — not surrounding code — to prevent false positives.
 
+### `search_docs` *(since v2.0.0)*
+
+Full-text search across indexed WordPress documentation. Supports filters for document type (guide, tutorial, reference, API, howto, FAQ), category, and source.
+
+### `get_doc` *(since v2.0.0)*
+
+Retrieve the full content of a specific documentation page by its ID. Returns the page title, content, metadata, code examples, and related links.
+
+### `list_docs` *(since v2.0.0)*
+
+Browse available documentation with optional filters for type, category, and source. Useful for discovering what documentation is indexed.
+
+## CLI Reference
+
+```
+Source management:
+  wp-hooks source:add         Add a source and index it
+  wp-hooks source:list        List all sources with indexed status
+  wp-hooks source:remove      Remove a source and all its data
+
+Presets (since v2.0.0):
+  wp-hooks quick-add <name>   Add a preset source
+  wp-hooks quick-add-all      Add all preset sources
+
+Indexing:
+  wp-hooks index              Re-index all sources (or --source <name>, --force)
+  wp-hooks update             Fetch and re-index stale sources (--source, --force) (since v2.0.0)
+
+Search:
+  wp-hooks search <query>     Search hooks (--type, --source, --include-removed)
+  wp-hooks search-blocks <q>  Search block registrations and JS APIs
+  wp-hooks search-docs <q>    Search documentation (--type, --category, --source) (since v2.0.0)
+  wp-hooks validate <name>    Check if a hook name exists (exit code 0/1)
+
+Maintenance:
+  wp-hooks stats              Hook/block/API/doc counts per source
+  wp-hooks rebuild-index      Rebuild FTS indexes if out of sync
+```
+
+### CLI Examples
+
+```bash
+# Search for checkout-related hooks
+npx wp-hooks search "woocommerce_checkout"
+
+# Search only filters
+npx wp-hooks search "woocommerce_product" --type filter
+
+# Validate a specific hook name
+npx wp-hooks validate "woocommerce_before_order_itemmeta"
+
+# Search for Gutenberg block APIs
+npx wp-hooks search-blocks "InspectorControls"
+
+# Search documentation (since v2.0.0)
+npx wp-hooks search-docs "custom post type"
+
+# Add all presets at once (since v2.0.0)
+npx wp-hooks quick-add-all
+
+# Re-index a specific source after updates
+npx wp-hooks index --source woocommerce
+
+# Update stale sources (since v2.0.0)
+npx wp-hooks update
+
+# Force full re-index (ignore file modification cache)
+npx wp-hooks index --force
+
+# See what you have indexed
+npx wp-hooks stats
+```
+
 ## How It Works
 
 1. **Sources** are registered via the CLI — each points to a GitHub repo or local folder
 2. **Indexing** clones/pulls the repo, scans PHP and JS/TS files, and extracts hooks using regex-based parsers
-3. **Storage** uses SQLite with FTS5 full-text search and WAL mode for fast concurrent reads
-4. **Incremental updates** skip files that haven't changed (mtime + content hash)
-5. **Soft-delete tracking** marks hooks that were previously indexed but no longer found as `removed`
-6. **The MCP server** exposes the database as tools over stdio — your AI assistant queries it in real-time
+3. **Documentation indexing** *(since v2.0.0)* parses markdown handbooks using specialized parsers that extract metadata, code examples, and categorization
+4. **Storage** uses SQLite with FTS5 full-text search and WAL mode for fast concurrent reads
+5. **Incremental updates** skip files that haven't changed (mtime + content hash)
+6. **Soft-delete tracking** marks hooks that were previously indexed but no longer found as `removed`
+7. **Auto-update** *(since v2.0.0)* refreshes stale sources (>24h) in the background on server start
+8. **The MCP server** exposes the database as tools over stdio — your AI assistant queries it in real-time
 
 ### Data Storage
 
@@ -284,9 +374,32 @@ All data lives in `~/.wp-devdocs-mcp/`:
   cache/            # Cloned repositories
 ```
 
+## Version History
+
+### v2.0.0
+
+- **Documentation indexing** — 7 specialized parsers for WordPress handbooks (block editor, plugin, REST API, WP-CLI, admin, general)
+- **3 new MCP tools** — `search_docs`, `get_doc`, `list_docs` for querying indexed documentation
+- **Preset system** — 8 pre-configured sources with `quick-add` and `quick-add-all` CLI commands
+- **Auto-update** — background refresh of stale sources (>24h) on each server start
+- **`update` CLI command** — manual fetch and re-index of stale sources
+- **`search-docs` CLI command** — search documentation from the terminal
+- **`--content-type` option** — distinguish between source code and documentation sources
+- **Enhanced `source:list`** — shows content type and last-indexed time
+
+### v1.0.1
+
+- Bug fixes (transaction-wrapped deletions, prepared statement cache, cross-platform paths)
+- JSDoc annotations, ESLint 9 integration
+
+### v1.0.0
+
+- Initial release — PHP/JS hook extraction, block registration tracking, SQLite FTS5 search, incremental indexing, 4 MCP tools (`search_hooks`, `validate_hook`, `get_hook_context`, `search_block_apis`)
+
 ## Requirements
 
 - Node.js 20+
+- Git
 - ~500MB disk space per large plugin source (WooCommerce, Gutenberg)
 
 ## License

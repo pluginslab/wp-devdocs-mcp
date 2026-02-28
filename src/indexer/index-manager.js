@@ -14,7 +14,9 @@ import {
   upsertApiUsage,
   getIndexedFile,
   upsertIndexedFile,
+  updateSourceLastIndexed,
 } from '../db/sqlite.js';
+import { indexDocsSource } from '../docs/doc-index-manager.js';
 
 const IGNORE_PATTERNS = [
   '**/node_modules/**',
@@ -63,6 +65,10 @@ export async function indexSources(opts = {}) {
     hooks_removed: 0,
     blocks_indexed: 0,
     apis_indexed: 0,
+    docs_inserted: 0,
+    docs_updated: 0,
+    docs_skipped: 0,
+    docs_removed: 0,
     errors: [],
   };
 
@@ -70,10 +76,15 @@ export async function indexSources(opts = {}) {
     try {
       console.error(`Fetching source: ${source.name} (${source.type})...`);
       const localPath = await fetchSource(source);
-      console.error(`Indexing source: ${source.name} from ${localPath}`);
+      console.error(`Indexing source: ${source.name} from ${localPath} (${source.content_type || 'source'})`);
 
-      await indexSource(source, localPath, force, stats);
+      if (source.content_type === 'docs') {
+        await indexDocsSource(source, localPath, force, stats);
+      } else {
+        await indexSource(source, localPath, force, stats);
+      }
       stats.sources_processed++;
+      updateSourceLastIndexed(source.id);
     } catch (err) {
       const msg = `Error processing source "${source.name}": ${err.message}`;
       console.error(msg);
