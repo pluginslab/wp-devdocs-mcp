@@ -442,16 +442,21 @@ export function searchHooks(query, opts = {}) {
   // Tokenize and add wildcards for prefix matching
   const terms = ftsQuery.split(/\s+/).filter(Boolean).map(t => `"${t}"*`).join(' ');
 
+  // Boost exact hook name matches so core hooks like "init" surface above
+  // longer-named hooks like "woocommerce_shipping_init" that have richer BM25 context.
+  // Exact matches get rank bonus of -100 (lower = better in BM25).
   let sql = `
     SELECT h.*, s.name AS source_name,
-      bm25(hooks_fts, 10, 5, 2, 3, 1, 1, 1) AS rank
+      bm25(hooks_fts, 10, 5, 2, 3, 1, 1, 1)
+        + CASE WHEN h.name = @rawQuery THEN -100 ELSE 0 END
+        AS rank
     FROM hooks_fts
     JOIN hooks h ON h.id = hooks_fts.rowid
     JOIN sources s ON s.id = h.source_id
     WHERE hooks_fts MATCH @terms
   `;
 
-  const params = { terms };
+  const params = { terms, rawQuery: ftsQuery };
 
   if (!includeRemoved) {
     sql += ` AND h.status = 'active'`;

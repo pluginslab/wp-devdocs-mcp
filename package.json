@@ -1,6 +1,6 @@
 {
   "name": "wp-devdocs-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "MCP server that indexes WordPress hooks, blocks, APIs, and official documentation — exposing them as queryable tools to AI assistants",
   "type": "module",
   "engines": {
