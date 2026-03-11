@@ -1,21 +1,48 @@
 {
   "name": "wp-devdocs-mcp",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "MCP server that indexes WordPress hooks, blocks, APIs, and official documentation — exposing them as queryable tools to AI assistants",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
   },
   "bin": {
-    "wp-hooks": "./bin/wp-hooks.js",
-    "wp-devdocs-mcp": "./src/mcp-entry.js",
-    "wp-mcp": "./src/mcp-entry.js"
+    "wp-hooks": "bin/wp-hooks.js",
+    "wp-devdocs-mcp": "src/mcp-entry.js",
+    "wp-mcp": "src/mcp-entry.js"
   },
+  "files": [
+    "src/",
+    "bin/",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "start": "node src/mcp-entry.js",
     "test": "node test/docs-test.js && node test/search-test.js",
     "lint": "eslint src/ bin/"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pluginslab/wp-devdocs-mcp.git"
+  },
+  "homepage": "https://github.com/pluginslab/wp-devdocs-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/pluginslab/wp-devdocs-mcp/issues"
+  },
+  "author": "Marcel Schmitz",
+  "keywords": [
+    "mcp",
+    "wordpress",
+    "hooks",
+    "devdocs",
+    "ai",
+    "claude",
+    "model-context-protocol",
+    "gutenberg",
+    "blocks",
+    "wp-cli"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^11.8.2",

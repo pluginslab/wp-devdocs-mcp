@@ -62,27 +62,36 @@ No hallucination. No guessing. No debugging phantom hooks.
 
 ## Quick Start
 
+### Install
+
 ```bash
-# Clone and install
-git clone https://github.com/pluginslab/wp-devdocs-mcp.git
-cd wp-devdocs-mcp
-npm install
-
-# Add all preset sources at once (since v1.1.0)
-npx wp-hooks quick-add-all
-
-# Or add individual presets (since v1.1.0)
-npx wp-hooks quick-add wp-core
-npx wp-hooks quick-add woocommerce
-npx wp-hooks quick-add gutenberg-source
-npx wp-hooks quick-add plugin-handbook
+npm install -g wp-devdocs-mcp
 ```
 
-Or add sources manually (works in all versions):
+Or run directly with npx (no install needed):
+
+```bash
+npx wp-devdocs-mcp
+```
+
+### Index Sources
+
+```bash
+# Add all preset sources at once (since v1.1.0)
+wp-hooks quick-add-all
+
+# Or add individual presets (since v1.1.0)
+wp-hooks quick-add wp-core
+wp-hooks quick-add woocommerce
+wp-hooks quick-add gutenberg-source
+wp-hooks quick-add plugin-handbook
+```
+
+Or add sources manually:
 
 ```bash
 # WooCommerce (uses trunk branch)
-npx wp-hooks source:add \
+wp-hooks source:add \
   --name woocommerce \
   --type github-public \
   --repo https://github.com/woocommerce/woocommerce \
@@ -101,7 +110,7 @@ Add the MCP server to your configuration. Create or edit `.mcp.json` in your pro
   "mcpServers": {
     "wp-devdocs": {
       "command": "npx",
-      "args": ["--prefix", "/absolute/path/to/wp-devdocs-mcp", "wp-devdocs-mcp"]
+      "args": ["wp-devdocs-mcp"]
     }
   }
 }
