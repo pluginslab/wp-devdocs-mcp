@@ -17,6 +17,7 @@ import {
   updateSourceLastIndexed,
 } from '../db/sqlite.js';
 import { indexDocsSource } from '../docs/doc-index-manager.js';
+import { indexThemeJsonSource } from './theme-json/index.js';
 
 const IGNORE_PATTERNS = [
   '**/node_modules/**',
@@ -69,6 +70,11 @@ export async function indexSources(opts = {}) {
     docs_updated: 0,
     docs_skipped: 0,
     docs_removed: 0,
+    theme_json_properties_inserted: 0,
+    theme_json_properties_updated: 0,
+    theme_json_properties_skipped: 0,
+    theme_json_properties_removed: 0,
+    theme_json_presets_indexed: 0,
     errors: [],
   };
 
@@ -80,6 +86,8 @@ export async function indexSources(opts = {}) {
 
       if (source.content_type === 'docs') {
         await indexDocsSource(source, localPath, force, stats);
+      } else if (source.content_type === 'theme-json') {
+        await indexThemeJsonSource(source, localPath, force, stats);
       } else {
         await indexSource(source, localPath, force, stats);
       }

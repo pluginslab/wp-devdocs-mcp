@@ -10,6 +10,8 @@ import { searchBlockApisSchema, handleSearchBlockApis } from './server/tools/sea
 import { searchDocsSchema, handleSearchDocs } from './server/tools/search-docs.js';
 import { getDocSchema, handleGetDoc } from './server/tools/get-doc.js';
 import { listDocsSchema, handleListDocs } from './server/tools/list-docs.js';
+import { searchThemeJsonPropertiesSchema, handleSearchThemeJsonProperties } from './server/tools/search-theme-json-properties.js';
+import { getThemeJsonPropertySchema, handleGetThemeJsonProperty } from './server/tools/get-theme-json-property.js';
 
 // Initialize DB on import (side effect)
 import { getDb, getStaleSources } from './db/sqlite.js';
@@ -17,7 +19,7 @@ import { indexSources } from './indexer/index-manager.js';
 
 const server = new McpServer({
   name: 'wp-devdocs-mcp',
-  version: '1.1.0',
+  version: '1.2.0',
 });
 
 // Register tools
@@ -68,6 +70,20 @@ server.tool(
   listDocsSchema.description,
   listDocsSchema.inputSchema,
   handleListDocs,
+);
+
+server.tool(
+  searchThemeJsonPropertiesSchema.name,
+  searchThemeJsonPropertiesSchema.description,
+  searchThemeJsonPropertiesSchema.inputSchema,
+  handleSearchThemeJsonProperties,
+);
+
+server.tool(
+  getThemeJsonPropertySchema.name,
+  getThemeJsonPropertySchema.description,
+  getThemeJsonPropertySchema.inputSchema,
+  handleGetThemeJsonProperty,
 );
 
 // Ensure DB is ready

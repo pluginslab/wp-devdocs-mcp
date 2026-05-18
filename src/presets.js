@@ -57,6 +57,13 @@ export const PRESETS = {
     branch: 'trunk',
     content_type: 'source',
   },
+  'theme-json': {
+    name: 'theme-json',
+    type: 'github-public',
+    repo_url: 'https://github.com/WordPress/gutenberg.git',
+    branch: 'trunk',
+    content_type: 'theme-json',
+  },
 };
 
 export function getPreset(name) {

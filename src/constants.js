@@ -19,4 +19,5 @@ export const DOC_TYPES = {
 export const CONTENT_TYPES = {
   SOURCE: 'source',
   DOCS: 'docs',
+  THEME_JSON: 'theme-json',
 };

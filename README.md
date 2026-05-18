@@ -134,6 +134,7 @@ Pre-configured sources you can add with a single command:
 | `rest-api-handbook` | REST API documentation |
 | `wp-cli-handbook` | WP-CLI reference |
 | `admin-handbook` | Advanced administration handbook |
+| `theme-json` *(since v1.2.0)* | theme.json property dictionary (Gutenberg schema + WP core class constants) |
 
 ## Indexing Sources
 
@@ -271,7 +272,7 @@ Each hook record includes: exact name, type, parameters, file path, line number,
 
 ## MCP Tools
 
-Seven tools are exposed to your AI assistant (four original + three added in v1.1.0):
+Nine tools are exposed to your AI assistant (four original + three added in v1.1.0 + two added in v1.2.0):
 
 ### `search_hooks`
 
@@ -301,6 +302,14 @@ Retrieve the full content of a specific documentation page by its ID. Returns th
 
 Browse available documentation with optional filters for type, category, and source. Useful for discovering what documentation is indexed.
 
+### `search_theme_json_properties` *(since v1.2.0)*
+
+Search valid `theme.json` property paths so AI assistants stop inventing block-theme keys. Returns BM25-ranked paths with their value origin (`enum` / `boolean` / `css_length` / `css_color` / `css_keyword` / `preset_ref:{type}` / `string` / `object` / `array` / `alias`), descriptions, and preset metadata. Filters by subtree (`settings`, `styles`, `top-level`, `settings.blocks`, `styles.blocks`, `styles.elements`) and value origin family.
+
+### `get_theme_json_property` *(since v1.2.0)*
+
+Exact-path lookup with NOT_FOUND-with-similar-suggestions on miss. Accepts global paths (`settings.color.palette`), per-block paths (`styles.blocks.core/paragraph.typography.fontSize`), and per-element paths (`styles.elements.button.color.text`). Cross-references registered block names — unknown blocks return `VALID_PATH_UNKNOWN_BLOCK`. Returns the linked preset's CSS variable template (e.g. `--wp--preset--color--$slug`) for `preset_ref` values.
+
 ## CLI Reference
 
 ```
@@ -318,10 +327,12 @@ Indexing:
   wp-hooks update             Fetch and re-index stale sources (--source, --force) (since v1.1.0)
 
 Search:
-  wp-hooks search <query>     Search hooks (--type, --source, --include-removed)
-  wp-hooks search-blocks <q>  Search block registrations and JS APIs
-  wp-hooks search-docs <q>    Search documentation (--type, --category, --source) (since v1.1.0)
-  wp-hooks validate <name>    Check if a hook name exists (exit code 0/1)
+  wp-hooks search <query>           Search hooks (--type, --source, --include-removed)
+  wp-hooks search-blocks <q>        Search block registrations and JS APIs
+  wp-hooks search-docs <q>          Search documentation (--type, --category, --source) (since v1.1.0)
+  wp-hooks search-theme-json <q>    Search theme.json property paths (--context, --value-origin) (since v1.2.0)
+  wp-hooks validate <name>          Check if a hook name exists (exit code 0/1)
+  wp-hooks get-theme-json-property <path>  Look up a theme.json path (per-block/per-element supported) (since v1.2.0)
 
 Maintenance:
   wp-hooks stats              Hook/block/API/doc counts per source

@@ -9,6 +9,8 @@ import {
   searchHooks,
   searchBlockApis,
   searchDocs,
+  searchThemeJsonProperties,
+  getThemeJsonProperty,
   validateHook,
   getStats,
   rebuildFtsIndex,
@@ -18,6 +20,8 @@ import {
 } from '../src/db/sqlite.js';
 import { indexSources } from '../src/indexer/index-manager.js';
 import { getPreset, listPresets } from '../src/presets.js';
+import { normalisePath, KNOWN_ELEMENTS } from '../src/indexer/theme-json/path-utils.js';
+import { isKnownBlockName } from '../src/db/sqlite.js';
 
 const program = new Command();
 
@@ -39,6 +43,11 @@ function printIndexStats(stats) {
   console.log(`  Docs updated:      ${stats.docs_updated}`);
   console.log(`  Docs unchanged:    ${stats.docs_skipped}`);
   console.log(`  Docs removed:      ${stats.docs_removed}`);
+  console.log(`  theme.json props inserted: ${stats.theme_json_properties_inserted || 0}`);
+  console.log(`  theme.json props updated:  ${stats.theme_json_properties_updated || 0}`);
+  console.log(`  theme.json props skipped:  ${stats.theme_json_properties_skipped || 0}`);
+  console.log(`  theme.json props removed:  ${stats.theme_json_properties_removed || 0}`);
+  console.log(`  theme.json presets:        ${stats.theme_json_presets_indexed || 0}`);
 
   if (stats.errors.length > 0) {
     console.log(`\n  Errors (${stats.errors.length}):`);
@@ -442,6 +451,98 @@ program
     }
   });
 
+// --- search-theme-json ---
+program
+  .command('search-theme-json <query>')
+  .description('Search indexed theme.json property paths')
+  .option('--context <ctx>', 'Restrict to subtree: settings, styles, top-level, settings.blocks, styles.blocks, styles.elements')
+  .option('--value-origin <origin>', 'Filter by value origin: enum, boolean, css_length, css_color, css_keyword, preset_ref:<type>, string, object, array, alias')
+  .option('--limit <n>', 'Max results', '20')
+  .action((query, opts) => {
+    try {
+      const results = searchThemeJsonProperties(query, {
+        context: opts.context,
+        value_origin: opts.valueOrigin,
+        limit: parseInt(opts.limit, 10),
+      });
+
+      if (results.length === 0) {
+        console.log(`No theme.json properties found matching "${query}".`);
+        return;
+      }
+
+      console.log(`\nFound ${results.length} theme.json property path(s) matching "${query}":\n`);
+      for (const r of results) {
+        console.log(`  ${r.path}`);
+        console.log(`    Context: ${r.parent_context} | Scope: ${r.scope} | Value origin: ${r.value_origin}`);
+        if (r.preset_name) console.log(`    Preset: ${r.preset_name}`);
+        if (r.enum_values) console.log(`    Allowed values: ${r.enum_values}`);
+        if (r.since) console.log(`    Since: WP ${r.since}`);
+        if (r.confirmed_by) console.log(`    Confirmed by: ${r.confirmed_by}`);
+        if (r.description) console.log(`    Description: ${r.description.slice(0, 200)}${r.description.length > 200 ? '...' : ''}`);
+        console.log('');
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
+// --- get-theme-json-property ---
+program
+  .command('get-theme-json-property <path>')
+  .description('Look up a theme.json property by exact path (e.g. settings.color.palette or styles.blocks.core/paragraph.typography.fontSize)')
+  .action((path) => {
+    try {
+      const { normalised, blockName, elementName } = normalisePath(path);
+      let result = getThemeJsonProperty(normalised);
+      if (result.status !== 'VALID' && normalised !== path) {
+        result = getThemeJsonProperty(path);
+      }
+      if (result.status === 'VALID') {
+        const p = result.property;
+        console.log(`\nVALID — ${path}`);
+        if (blockName) {
+          const known = isKnownBlockName(blockName);
+          console.log(`  Block name: ${blockName} — ${known ? 'KNOWN (registered)' : 'UNKNOWN (VALID_PATH_UNKNOWN_BLOCK)'}`);
+        }
+        if (elementName) {
+          const ok = KNOWN_ELEMENTS.has(elementName);
+          console.log(`  Element name: ${elementName} — ${ok ? 'valid' : 'UNKNOWN'}`);
+        }
+        console.log(`  Context: ${p.parent_context} | Scope: ${p.scope} | Value origin: ${p.value_origin}`);
+        if (p.json_type) console.log(`  JSON type: ${p.json_type}`);
+        if (p.preset_name) console.log(`  Preset: ${p.preset_name}`);
+        if (p.enum_values) console.log(`  Allowed values: ${p.enum_values}`);
+        if (p.since) console.log(`  Since: WP ${p.since}`);
+        if (p.confirmed_by) console.log(`  Confirmed by: ${p.confirmed_by}`);
+        if (p.description) console.log(`  Description: ${p.description}`);
+        if (result.preset) {
+          console.log(`\n  Preset metadata:`);
+          console.log(`    Settings path: ${result.preset.settings_path}`);
+          if (result.preset.css_var_template) console.log(`    CSS variable: ${result.preset.css_var_template}`);
+          if (result.preset.css_properties) console.log(`    CSS properties: ${result.preset.css_properties}`);
+        }
+        process.exit(0);
+      }
+      console.log(`\nNOT FOUND — "${path}" is not a valid theme.json property path.`);
+      if (result.similar.length > 0) {
+        console.log('\nDid you mean:');
+        for (const s of result.similar) {
+          console.log(`  ${s.path} (${s.value_origin}${s.scope !== 'global' ? `, ${s.scope}` : ''})`);
+        }
+      }
+      process.exit(1);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    } finally {
+      closeDb();
+    }
+  });
+
 // --- validate ---
 program
   .command('validate <hook-name>')
@@ -494,6 +595,7 @@ program
       console.log(`  Block registrations: ${stats.totals.block_registrations}`);
       console.log(`  API usages:          ${stats.totals.api_usages}`);
       console.log(`  Documentation pages: ${stats.totals.docs}`);
+      console.log(`  theme.json props:    ${stats.totals.theme_json_properties || 0}`);
 
       if (stats.per_source.length > 0) {
         console.log('\nPer Source:');

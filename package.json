@@ -1,6 +1,6 @@
 {
   "name": "wp-devdocs-mcp",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "MCP server that indexes WordPress hooks, blocks, APIs, and official documentation — exposing them as queryable tools to AI assistants",
   "type": "module",
   "engines": {
@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "start": "node src/mcp-entry.js",
-    "test": "node test/docs-test.js && node test/search-test.js",
+    "test": "node test/docs-test.js && node test/search-test.js && node test/theme-json-test.js",
     "lint": "eslint src/ bin/"
   },
   "repository": {

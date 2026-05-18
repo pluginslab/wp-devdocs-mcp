@@ -20,8 +20,11 @@ import {
   validateHook,
   getHookContext,
   searchBlockApis,
+  searchThemeJsonProperties,
+  getThemeJsonProperty,
   closeDb,
 } from '../src/db/sqlite.js';
+import { normalisePath } from '../src/indexer/theme-json/path-utils.js';
 
 const client = new Anthropic();
 const MODEL = 'claude-sonnet-4-20250514';
@@ -74,6 +77,31 @@ const tools = [
         limit: { type: 'number' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'search_theme_json_properties',
+    description: 'Search valid theme.json property paths. Use BEFORE writing theme.json.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        context: { type: 'string', enum: ['settings', 'styles', 'top-level', 'settings.blocks', 'styles.blocks', 'styles.elements'] },
+        value_origin: { type: 'string' },
+        limit: { type: 'number' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_theme_json_property',
+    description: 'Validate a specific theme.json property path. Returns VALID with value origin/preset metadata, or NOT_FOUND with similar suggestions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Dot-delimited theme.json path' },
+      },
+      required: ['path'],
     },
   },
 ];
@@ -132,6 +160,33 @@ function executeTool(name, input) {
           api_call: a.api_call, namespace: a.namespace, method: a.method,
           file: `${a.file_path}:${a.line_number}`, source: a.source_name,
         })),
+      });
+    }
+    case 'search_theme_json_properties': {
+      const results = searchThemeJsonProperties(input.query, {
+        context: input.context, value_origin: input.value_origin,
+        limit: input.limit || 10,
+      });
+      return JSON.stringify(results.map(r => ({
+        path: r.path, parent_context: r.parent_context, scope: r.scope,
+        value_origin: r.value_origin, preset: r.preset_name,
+        enum_values: r.enum_values, description: r.description,
+      })));
+    }
+    case 'get_theme_json_property': {
+      const { normalised } = normalisePath(input.path);
+      const r = getThemeJsonProperty(normalised);
+      if (r.status === 'VALID') {
+        return JSON.stringify({
+          status: 'VALID', path: r.property.path,
+          value_origin: r.property.value_origin, scope: r.property.scope,
+          preset: r.preset, description: r.property.description,
+          enum_values: r.property.enum_values,
+        });
+      }
+      return JSON.stringify({
+        status: 'NOT_FOUND',
+        similar: r.similar.map(s => ({ path: s.path, value_origin: s.value_origin })),
       });
     }
     default:
@@ -413,6 +468,39 @@ Write the complete plugin PHP file with inline JavaScript.`,
       wrongHooks: [
         'PluginSidebar',              // wrong — this creates a separate sidebar, not a document panel
         'wp.editor.PluginSidebar',    // deprecated namespace
+      ],
+    },
+  },
+  {
+    name: '6. theme.json: Brand palette + fluid headings + per-block padding',
+    prompt: `A client is building a block theme. Write a theme.json file (version 3) that:
+- Disables the default color palette and adds a custom palette with three brand colors: brand-primary (#0066cc), brand-accent (#ff6b35), brand-dark (#1a1a1a)
+- Enables fluid typography
+- Sets a default font-size for the typography preset list with three sizes (small, medium, large)
+- Sets H1 font-size to var(--wp--preset--font-size--large) using the styles.elements path
+- Removes all padding from the core/group block by setting top, right, bottom, left to "0"
+- References the brand-primary color as the background of the core/button block
+
+Use ONLY valid theme.json property paths — no invented keys. Validate every path against the schema before writing.`,
+    checks: {
+      requiredPatterns: [
+        '"version"\\s*:\\s*3',
+        '"settings"',
+        '"styles"',
+        'brand-primary',
+        'var\\(\\s*--wp--preset--',
+        '"core/group"',
+        '"core/button"',
+        'fluid',
+      ],
+      // Common theme.json hallucinations
+      wrongHooks: [
+        '"colors"',                    // should be "color.palette"
+        '"fontSize"\\s*:\\s*"large"',  // value should be a CSS var or size, not a slug
+        '"settings"\\s*:\\s*\\{\\s*"blocks"\\s*:\\s*\\{\\s*"paragraph"', // missing namespace
+        '"useFluidTypography"',        // wrong key — should be "fluid"
+        '"customColors"',              // wrong key — should be "color.custom"
+        '"defaultColors"',             // wrong key — should be "color.defaultPalette"
       ],
     },
   },

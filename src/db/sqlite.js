@@ -186,6 +186,55 @@ function initDb(db) {
       content_rowid='id',
       tokenize='porter unicode61'
     );
+
+    CREATE TABLE IF NOT EXISTS theme_json_properties (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      parent_context TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'global',
+      json_type TEXT,
+      value_origin TEXT NOT NULL,
+      enum_values TEXT,
+      description TEXT,
+      since TEXT,
+      confirmed_by TEXT NOT NULL DEFAULT 'schema',
+      preset_name TEXT,
+      schema_ref TEXT,
+      content_hash TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      removed_at TEXT,
+      first_seen_at TEXT DEFAULT (datetime('now')),
+      last_seen_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(source_id, path)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tjp_path ON theme_json_properties(path);
+    CREATE INDEX IF NOT EXISTS idx_tjp_context ON theme_json_properties(parent_context);
+    CREATE INDEX IF NOT EXISTS idx_tjp_origin ON theme_json_properties(value_origin);
+    CREATE INDEX IF NOT EXISTS idx_tjp_status ON theme_json_properties(status);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS theme_json_properties_fts USING fts5(
+      path,
+      parent_context,
+      description,
+      value_origin,
+      enum_values,
+      content='theme_json_properties',
+      content_rowid='id',
+      tokenize='porter unicode61'
+    );
+
+    CREATE TABLE IF NOT EXISTS theme_json_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      preset_name TEXT NOT NULL,
+      settings_path TEXT NOT NULL,
+      css_var_template TEXT,
+      value_key TEXT,
+      css_properties TEXT,
+      UNIQUE(source_id, preset_name)
+    );
   `);
 
   // Migration: add content_type to sources if missing (for existing databases)
@@ -288,6 +337,7 @@ export function removeSource(name) {
     stmt(db, 'DELETE FROM block_registrations_fts WHERE rowid IN (SELECT id FROM block_registrations WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM api_usages_fts WHERE rowid IN (SELECT id FROM api_usages WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM docs_fts WHERE rowid IN (SELECT id FROM docs WHERE source_id = ?)').run(source.id);
+    stmt(db, 'DELETE FROM theme_json_properties_fts WHERE rowid IN (SELECT id FROM theme_json_properties WHERE source_id = ?)').run(source.id);
     stmt(db, 'DELETE FROM sources WHERE name = ?').run(name);
   });
   tx();
@@ -729,6 +779,13 @@ export function rebuildFtsIndex() {
       INSERT INTO docs_fts(rowid, title, slug, doc_type, category, description, content)
       SELECT id, title, slug, doc_type, category, description, content FROM docs
     `);
+
+    // Rebuild theme_json_properties FTS
+    db.exec('DELETE FROM theme_json_properties_fts');
+    db.exec(`
+      INSERT INTO theme_json_properties_fts(rowid, path, parent_context, description, value_origin, enum_values)
+      SELECT id, path, parent_context, description, value_origin, enum_values FROM theme_json_properties
+    `);
   });
   tx();
 }
@@ -747,6 +804,7 @@ export function getStats() {
   const blocks = stmt(db, 'SELECT COUNT(*) as count FROM block_registrations').get();
   const apis = stmt(db, 'SELECT COUNT(*) as count FROM api_usages').get();
   const docs = stmt(db, "SELECT COUNT(*) as count FROM docs WHERE status = 'active'").get();
+  const themeJsonProps = stmt(db, "SELECT COUNT(*) as count FROM theme_json_properties WHERE status = 'active'").get();
 
   const perSource = db.prepare(`
     SELECT s.name, s.content_type,
@@ -755,6 +813,7 @@ export function getStats() {
       (SELECT COUNT(*) FROM block_registrations WHERE source_id = s.id) AS blocks,
       (SELECT COUNT(*) FROM api_usages WHERE source_id = s.id) AS apis,
       (SELECT COUNT(*) FROM docs WHERE source_id = s.id AND status = 'active') AS docs,
+      (SELECT COUNT(*) FROM theme_json_properties WHERE source_id = s.id AND status = 'active') AS theme_json_properties,
       (SELECT COUNT(*) FROM indexed_files WHERE source_id = s.id) AS files
     FROM sources s ORDER BY s.name
   `).all();
@@ -767,6 +826,7 @@ export function getStats() {
       block_registrations: blocks.count,
       api_usages: apis.count,
       docs: docs.count,
+      theme_json_properties: themeJsonProps.count,
     },
     per_source: perSource,
   };
@@ -1009,4 +1069,227 @@ export function listDocs(opts = {}) {
   params.limit = limit;
 
   return db.prepare(sql).all(params);
+}
+
+// --- Theme JSON Properties ---
+
+/**
+ * Insert or update a theme.json property record. Uses content_hash for change detection.
+ * @param {object} data - { source_id, path, parent_context, scope, json_type, value_origin,
+ *                          enum_values?, description?, since?, confirmed_by, preset_name?,
+ *                          schema_ref?, content_hash }
+ * @returns {{ id: number, action: string }}
+ */
+export function upsertThemeJsonProperty(data) {
+  const db = getDb();
+  const tx = db.transaction((d) => {
+    const existing = stmt(db, `
+      SELECT id, content_hash FROM theme_json_properties
+      WHERE source_id = @source_id AND path = @path
+    `).get(d);
+
+    if (existing) {
+      if (existing.content_hash === d.content_hash) {
+        stmt(db, "UPDATE theme_json_properties SET last_seen_at = datetime('now'), status = 'active', removed_at = NULL WHERE id = ?").run(existing.id);
+        return { id: existing.id, action: 'skipped' };
+      }
+      stmt(db, `
+        UPDATE theme_json_properties SET
+          parent_context = @parent_context, scope = @scope, json_type = @json_type,
+          value_origin = @value_origin, enum_values = @enum_values,
+          description = @description, since = @since, confirmed_by = @confirmed_by,
+          preset_name = @preset_name, schema_ref = @schema_ref,
+          content_hash = @content_hash, status = 'active', removed_at = NULL,
+          last_seen_at = datetime('now')
+        WHERE id = @id
+      `).run({ ...d, id: existing.id });
+      stmt(db, 'DELETE FROM theme_json_properties_fts WHERE rowid = ?').run(existing.id);
+      stmt(db, `
+        INSERT INTO theme_json_properties_fts(rowid, path, parent_context, description, value_origin, enum_values)
+        VALUES (@id, @path, @parent_context, @description, @value_origin, @enum_values)
+      `).run({ ...d, id: existing.id });
+      return { id: existing.id, action: 'updated' };
+    }
+
+    const result = stmt(db, `
+      INSERT INTO theme_json_properties (
+        source_id, path, parent_context, scope, json_type, value_origin, enum_values,
+        description, since, confirmed_by, preset_name, schema_ref, content_hash, status
+      ) VALUES (
+        @source_id, @path, @parent_context, @scope, @json_type, @value_origin, @enum_values,
+        @description, @since, @confirmed_by, @preset_name, @schema_ref, @content_hash, 'active'
+      )
+    `).run(d);
+
+    stmt(db, `
+      INSERT INTO theme_json_properties_fts(rowid, path, parent_context, description, value_origin, enum_values)
+      VALUES (@id, @path, @parent_context, @description, @value_origin, @enum_values)
+    `).run({ ...d, id: result.lastInsertRowid });
+
+    return { id: result.lastInsertRowid, action: 'inserted' };
+  });
+
+  return tx(data);
+}
+
+/**
+ * Soft-delete theme_json_properties for a source that are not in activeIds.
+ */
+export function markThemeJsonPropertiesRemoved(sourceId, activeIds) {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const all = stmt(db, `
+      SELECT id FROM theme_json_properties WHERE source_id = ? AND status = 'active'
+    `).all(sourceId);
+
+    const activeSet = new Set(activeIds.map(Number));
+    const toRemove = all.filter(r => !activeSet.has(r.id));
+
+    const removeStmt = stmt(db, `
+      UPDATE theme_json_properties SET status = 'removed', removed_at = datetime('now') WHERE id = ?
+    `);
+
+    for (const r of toRemove) removeStmt.run(r.id);
+    return toRemove.length;
+  });
+  return tx();
+}
+
+/**
+ * Upsert a preset metadata row (color/spacing/font-size/etc → CSS var template).
+ */
+export function upsertThemeJsonPreset(data) {
+  const db = getDb();
+  stmt(db, `
+    INSERT INTO theme_json_presets (source_id, preset_name, settings_path, css_var_template, value_key, css_properties)
+    VALUES (@source_id, @preset_name, @settings_path, @css_var_template, @value_key, @css_properties)
+    ON CONFLICT(source_id, preset_name) DO UPDATE SET
+      settings_path = @settings_path,
+      css_var_template = @css_var_template,
+      value_key = @value_key,
+      css_properties = @css_properties
+  `).run(data);
+}
+
+/**
+ * Get a preset by name (for resolving preset_ref values).
+ */
+export function getThemeJsonPreset(presetName) {
+  const db = getDb();
+  return stmt(db, `
+    SELECT p.*, s.name AS source_name FROM theme_json_presets p
+    JOIN sources s ON s.id = p.source_id
+    WHERE p.preset_name = ?
+    ORDER BY p.id DESC LIMIT 1
+  `).get(presetName);
+}
+
+/**
+ * FTS5 search over theme.json property paths.
+ * @param {string} query
+ * @param {object} [opts] - { context, value_origin, limit }
+ */
+export function searchThemeJsonProperties(query, opts = {}) {
+  const db = getDb();
+  const { context, value_origin, limit = 20 } = opts;
+
+  const ftsQuery = query.replace(/['"(){}[\]*:^~!]/g, ' ').trim();
+  if (!ftsQuery) return [];
+
+  // Dot-delimited paths get split on dots so "color.palette" finds it
+  const terms = ftsQuery.split(/[\s.]+/).filter(Boolean).map(t => `"${t}"*`).join(' ');
+
+  let sql = `
+    SELECT p.id, p.path, p.parent_context, p.scope, p.json_type, p.value_origin,
+      p.enum_values, p.description, p.since, p.confirmed_by, p.preset_name, p.status,
+      s.name AS source_name,
+      bm25(theme_json_properties_fts, 10, 3, 5, 2, 2)
+        + CASE WHEN p.path = @rawQuery THEN -100 ELSE 0 END
+        AS rank
+    FROM theme_json_properties_fts
+    JOIN theme_json_properties p ON p.id = theme_json_properties_fts.rowid
+    JOIN sources s ON s.id = p.source_id
+    WHERE theme_json_properties_fts MATCH @terms
+      AND p.status = 'active'
+  `;
+
+  const params = { terms, rawQuery: ftsQuery };
+
+  if (context) {
+    sql += ` AND p.parent_context LIKE @context_prefix`;
+    params.context_prefix = `${context}%`;
+  }
+  if (value_origin) {
+    sql += ` AND p.value_origin = @value_origin`;
+    params.value_origin = value_origin;
+  }
+
+  sql += ` ORDER BY rank LIMIT @limit`;
+  params.limit = limit;
+
+  try {
+    return db.prepare(sql).all(params);
+  } catch (err) {
+    console.error(`searchThemeJsonProperties FTS error: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Exact-path lookup with optional similar-path suggestions via FTS.
+ * Caller is responsible for normalising per-block/per-element paths before calling.
+ * @returns {{ status: 'VALID', property, preset? } | { status: 'NOT_FOUND', similar: Array }}
+ */
+export function getThemeJsonProperty(path) {
+  const db = getDb();
+
+  const exact = stmt(db, `
+    SELECT p.*, s.name AS source_name FROM theme_json_properties p
+    JOIN sources s ON s.id = p.source_id
+    WHERE p.path = ? AND p.status = 'active'
+    ORDER BY p.last_seen_at DESC LIMIT 1
+  `).get(path);
+
+  if (exact) {
+    let preset = null;
+    if (exact.preset_name) {
+      preset = stmt(db, `
+        SELECT * FROM theme_json_presets WHERE preset_name = ? ORDER BY id DESC LIMIT 1
+      `).get(exact.preset_name);
+    }
+    return { status: 'VALID', property: exact, preset };
+  }
+
+  // FTS similar suggestions — split path on dots, search
+  const ftsQuery = path.replace(/['"(){}[\]*:^~!]/g, ' ').split(/[\s.]+/).filter(Boolean);
+  const terms = ftsQuery.map(t => `"${t}"*`).join(' ');
+
+  let similar = [];
+  if (terms) {
+    try {
+      similar = db.prepare(`
+        SELECT p.path, p.parent_context, p.value_origin, p.description, p.scope,
+          bm25(theme_json_properties_fts, 10, 3, 5, 2, 2) AS rank
+        FROM theme_json_properties_fts
+        JOIN theme_json_properties p ON p.id = theme_json_properties_fts.rowid
+        WHERE theme_json_properties_fts MATCH @terms AND p.status = 'active'
+        ORDER BY rank LIMIT 5
+      `).all({ terms });
+    } catch {
+      // FTS may fail
+    }
+  }
+
+  return { status: 'NOT_FOUND', similar };
+}
+
+/**
+ * Check whether a block name has been registered (used for VALID_PATH_UNKNOWN_BLOCK detection).
+ */
+export function isKnownBlockName(blockName) {
+  const db = getDb();
+  const row = stmt(db, `
+    SELECT 1 FROM block_registrations WHERE block_name = ? LIMIT 1
+  `).get(blockName);
+  return !!row;
 }
