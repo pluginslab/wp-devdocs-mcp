@@ -85,6 +85,11 @@ wp-hooks quick-add wp-core
 wp-hooks quick-add woocommerce
 wp-hooks quick-add gutenberg-source
 wp-hooks quick-add plugin-handbook
+
+# theme.json property dictionary (since v1.2.0)
+# Index wp-core first so preset_ref classification works (soft-degrades to schema-only otherwise)
+wp-hooks quick-add wp-core
+wp-hooks quick-add theme-json
 ```
 
 Or add sources manually:
