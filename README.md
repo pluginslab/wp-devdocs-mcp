@@ -1,7 +1,7 @@
 # wp-devdocs-mcp
 
 <p align="center">
-  <img src="assets/banner.jpg" alt="Before: AI guessing hook names. After: Verified database, no more hallucinations." width="600">
+  <img src="assets/banner-v1.2.0.jpg" alt="Before: AI guessing theme.json keys. After: verified theme.json property dictionary, no more invented keys." width="600">
 </p>
 
 **Give your AI coding assistant a verified WordPress hook database instead of letting it guess.**
